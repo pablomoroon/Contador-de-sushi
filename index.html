@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Sushi Counter</title>
+<meta name="theme-color" content="#C1402A" />
+<meta name="description" content="Cuenta cada pieza de sushi que comes y lleva tu historial anual." />
+<link rel="manifest" href="./manifest.json" />
+<link rel="icon" href="./icon-192.png" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<style>
+  html, body { margin: 0; padding: 0; background: #F3EAD8; min-height: 100vh; }
+  #root { min-height: 100vh; }
+</style>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // --- Shim de almacenamiento persistente usando localStorage del propio dispositivo ---
+  // Implementa la misma interfaz que window.storage usa dentro de la app (get/set/delete/list)
+  function storageKey(key, shared) { return "sushi:" + (shared ? "shared" : "me") + ":" + key; }
+  window.storage = {
+    get: async function (key, shared) {
+      const raw = localStorage.getItem(storageKey(key, shared));
+      if (raw === null) return null;
+      return { key: key, value: raw, shared: !!shared };
+    },
+    set: async function (key, value, shared) {
+      localStorage.setItem(storageKey(key, shared), value);
+      return { key: key, value: value, shared: !!shared };
+    },
+    delete: async function (key, shared) {
+      localStorage.removeItem(storageKey(key, shared));
+      return { key: key, deleted: true, shared: !!shared };
+    },
+    list: async function (prefix, shared) {
+      const p = storageKey(prefix || "", shared);
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(p) === 0) keys.push(k.slice(("sushi:" + (shared ? "shared" : "me") + ":").length));
+      }
+      return { keys: keys, prefix: prefix, shared: !!shared };
+    }
+  };
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("./sw.js").catch(function (e) { console.warn("SW no registrado", e); });
+    });
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// --- Iconos propios (sustituyen a lucide-react para no depender de un empaquetador) ---
+function iconProps(size, extra) {
+  return Object.assign({
+    width: size || 16, height: size || 16, viewBox: "0 0 24 24",
+    fill: "none", stroke: "currentColor", strokeWidth: 2.2,
+    strokeLinecap: "round", strokeLinejoin: "round"
+  }, extra || {});
+}
+function Minus(props) { return <svg {...iconProps(props.size, props)}><line x1="5" y1="12" x2="19" y2="12" /></svg>; }
+function Check(props) { return <svg {...iconProps(props.size, props)}><polyline points="20 6 9 17 4 12" /></svg>; }
+function X(props) { return <svg {...iconProps(props.size, props)}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>; }
+function Trash2(props) { return <svg {...iconProps(props.size, props)}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>; }
+function CalendarPlus(props) { return <svg {...iconProps(props.size, props)}><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="20" /><line x1="9" y1="17" x2="15" y2="17" /></svg>; }
+function Loader2(props) { return <svg {...iconProps(props.size, props)} className={props.className}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>; }
+
+
+const YEAR_NOW = new Date().getFullYear();
+const MONTHS_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+const PIECE_TYPES = [
+  { id: "salmon", label: "Salmón" },
+  { id: "tuna", label: "Atún" },
+  { id: "maki", label: "Maki" },
+  { id: "gunkan", label: "Gunkan" },
+  { id: "tamago", label: "Tamago" },
+  { id: "temaki", label: "Temaki" },
+];
+
+const LEVELS = [
+  { min: 0, label: "Aprendiz de palillos", emoji: "🥢" },
+  { min: 50, label: "Aficionado", emoji: "🍣" },
+  { min: 150, label: "Fan del sushi", emoji: "🍱" },
+  { min: 400, label: "Maestro Itamae", emoji: "🔪" },
+  { min: 1000, label: "Leyenda del sushi", emoji: "🐉" },
+];
+
+function uid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatDate(iso) {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function todayISO() {
+  const d = new Date();
+  const off = d.getTimezoneOffset();
+  const local = new Date(d.getTime() - off * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function getLevelInfo(total) {
+  let current = LEVELS[0];
+  let next = LEVELS[1];
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (total >= LEVELS[i].min) {
+      current = LEVELS[i];
+      next = LEVELS[i + 1] || null;
+    }
+  }
+  const span = next ? next.min - current.min : 1;
+  const progressed = next ? Math.min(1, (total - current.min) / span) : 1;
+  return { current, next, progressed };
+}
+
+function Face({ cx, cy, spread = 8, tone = "closed", blush = 5, mouth = "smile" }) {
+  const ex = spread;
+  const bl = blush;
+  return (
+    <g>
+      {tone === "closed" ? (
+        <path
+          d={`M${cx - ex - 2} ${cy} Q${cx - ex} ${cy - 3.4} ${cx - ex + 2} ${cy} M${cx + ex - 2} ${cy} Q${cx + ex} ${cy - 3.4} ${cx + ex + 2} ${cy}`}
+          stroke="#241F1A"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          fill="none"
+        />
+      ) : (
+        <>
+          <circle cx={cx - ex} cy={cy} r="1.9" fill="#241F1A" />
+          <circle cx={cx + ex} cy={cy} r="1.9" fill="#241F1A" />
+          <circle cx={cx - ex + 0.6} cy={cy - 0.6} r="0.6" fill="#fff" />
+          <circle cx={cx + ex + 0.6} cy={cy - 0.6} r="0.6" fill="#fff" />
+        </>
+      )}
+      <ellipse cx={cx - ex - bl} cy={cy + 4} rx="3.4" ry="2.2" fill="#FF9EA6" opacity="0.55" />
+      <ellipse cx={cx + ex + bl} cy={cy + 4} rx="3.4" ry="2.2" fill="#FF9EA6" opacity="0.55" />
+      {mouth === "smile" ? (
+        <path d={`M${cx - 3} ${cy + 4.5} Q${cx} ${cy + 7.5} ${cx + 3} ${cy + 4.5}`} stroke="#241F1A" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      ) : (
+        <ellipse cx={cx} cy={cy + 5.5} rx="1.6" ry="2" fill="#241F1A" />
+      )}
+    </g>
+  );
+}
+
+function SushiPiece({ type, size = 90 }) {
+  const common = { width: size, height: size, viewBox: "0 0 100 100", xmlns: "http://www.w3.org/2000/svg" };
+  switch (type) {
+    case "tuna":
+      return (
+        <svg {...common}>
+          <path d="M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
+          <path d="M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z" fill="#8B2E2E" />
+          <Face cx={50} cy={50} spread={7} tone="closed" mouth="smile" />
+        </svg>
+      );
+    case "salmon":
+      return (
+        <svg {...common}>
+          <path d="M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
+          <path d="M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z" fill="#E8916B" />
+          <path d="M30 48 L34 55 M66 48 L63 55" stroke="#F2B393" strokeWidth="1.4" strokeLinecap="round" />
+          <Face cx={50} cy={51} spread={7} tone="dot" mouth="smile" />
+        </svg>
+      );
+    case "maki":
+      return (
+        <svg {...common}>
+          <circle cx="50" cy="52" r="33" fill="#241F1A" />
+          <circle cx="50" cy="52" r="26" fill="#F6EFDE" />
+          <circle cx="50" cy="52" r="12" fill="#6B8E5A" />
+          <Face cx={50} cy={51} spread={5} tone="dot" blush={4} mouth="smile" />
+        </svg>
+      );
+    case "gunkan":
+      return (
+        <svg {...common}>
+          <circle cx="50" cy="52" r="34" fill="#241F1A" />
+          <circle cx="50" cy="52" r="27" fill="#F6EFDE" />
+          {[[38,42],[62,42],[50,36],[44,58],[56,58],[50,64]].map(([x,y],i)=>(
+            <ellipse key={i} cx={x} cy={y} rx="3.2" ry="2.6" fill="#D98A2B" stroke="#B4691A" strokeWidth="0.6" />
+          ))}
+          <Face cx={50} cy={62} spread={6} tone="closed" mouth="smile" />
+        </svg>
+      );
+    case "tamago":
+      return (
+        <svg {...common}>
+          <path d="M20 58 Q20 42 50 42 Q80 42 80 58 L80 69 Q80 79 50 79 Q20 79 20 69 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
+          <rect x="23" y="30" width="54" height="24" rx="5" fill="#E8C34A" stroke="#C9A22E" strokeWidth="1" />
+          <rect x="20" y="50" width="60" height="9" fill="#241F1A" />
+          <Face cx={50} cy={40} spread={7} tone="dot" blush={4} mouth="smile" />
+        </svg>
+      );
+    case "temaki":
+      return (
+        <svg {...common}>
+          <path d="M50 14 L86 82 L14 82 Z" fill="#241F1A" />
+          <path d="M50 26 L73 74 L27 74 Z" fill="#F6EFDE" />
+          <path d="M40 32 Q50 22 60 32 L57 47 Q50 39 43 47 Z" fill="#E8916B" />
+          <Face cx={50} cy={58} spread={7} tone="closed" mouth="smile" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+function SushiCounter() {
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("hoy");
+  const [meals, setMeals] = useState([]);
+  const [session, setSession] = useState({ pieces: 0, startedAt: todayISO(), note: "" });
+  const [pieceType, setPieceType] = useState("salmon");
+  const [ripples, setRipples] = useState([]);
+  const [pops, setPops] = useState([]);
+  const [toast, setToast] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newDate, setNewDate] = useState(todayISO());
+  const [newPieces, setNewPieces] = useState("");
+  const [newNote, setNewNote] = useState("");
+  const [showEndForm, setShowEndForm] = useState(false);
+  const [endNote, setEndNote] = useState("");
+  const toastTimer = useRef(null);
+  const saveTimer = useRef(null);
+  const pendingSessionRef = useRef(null);
+
+  const flushSessionSave = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (pendingSessionRef.current) {
+      try {
+        await window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false);
+      } catch (e) {
+        console.error("Error guardando sesión", e);
+      }
+      pendingSessionRef.current = null;
+    }
+  }, []);
+
+  const persistSessionSoon = useCallback((data) => {
+    pendingSessionRef.current = data;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushSessionSave, 350);
+  }, [flushSessionSave]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        let mealsData = [];
+        try {
+          const r = await window.storage.get("meals", false);
+          if (r && r.value) mealsData = JSON.parse(r.value);
+        } catch (e) {}
+
+        let sessionData = { pieces: 0, startedAt: todayISO(), note: "" };
+        try {
+          const r2 = await window.storage.get("current-session", false);
+          if (r2 && r2.value) sessionData = JSON.parse(r2.value);
+        } catch (e) {}
+
+        let type = "salmon";
+        try {
+          const r3 = await window.storage.get("piece-type", false);
+          if (r3 && r3.value) type = JSON.parse(r3.value);
+        } catch (e) {}
+
+        setMeals(mealsData);
+        setSession(sessionData);
+        setPieceType(type);
+      } catch (e) {
+        console.error("Error cargando datos", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (pendingSessionRef.current) {
+        window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false).catch(() => {});
+      }
+    };
+  }, []);
+
+  const saveMeals = useCallback(async (next) => {
+    setMeals(next);
+    try {
+      await window.storage.set("meals", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Error guardando comidas", e);
+    }
+  }, []);
+
+  const saveSession = useCallback(async (next) => {
+    setSession(next);
+    try {
+      await window.storage.set("current-session", JSON.stringify(next), false);
+    } catch (e) {
+      console.error("Error guardando sesión", e);
+    }
+  }, []);
+
+  const changePieceType = useCallback(async (type) => {
+    setPieceType(type);
+    try {
+      await window.storage.set("piece-type", JSON.stringify(type), false);
+    } catch (e) {
+      console.error("Error guardando tipo de pieza", e);
+    }
+  }, []);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
+  };
+
+  // Toque en el sello: actualización funcional para que cada toque cuente
+  // aunque lleguen muy seguidos, y el guardado real se agrupa (debounce)
+  // para no saturar el almacenamiento con toques rápidos.
+  const stamp = () => {
+    setSession((prev) => {
+      const next = { ...prev, pieces: prev.pieces + 1 };
+      persistSessionSoon(next);
+      return next;
+    });
+    const id = uid();
+    setRipples((r) => [...r, id]);
+    setPops((p) => [...p, { id, x: Math.round((Math.random() - 0.5) * 30) }]);
+    if (navigator.vibrate) navigator.vibrate(8);
+  };
+
+  const removeRipple = (id) => setRipples((r) => r.filter((x) => x !== id));
+  const removePop = (id) => setPops((p) => p.filter((x) => x.id !== id));
+
+  const correctMinus = () => {
+    setSession((prev) => {
+      if (prev.pieces <= 0) return prev;
+      const next = { ...prev, pieces: prev.pieces - 1 };
+      persistSessionSoon(next);
+      return next;
+    });
+  };
+
+  const openEndForm = () => {
+    if (session.pieces <= 0) {
+      showToast("Añade alguna pieza antes de terminar la comida");
+      return;
+    }
+    setEndNote("");
+    setShowEndForm(true);
+  };
+
+  const cancelEndForm = () => {
+    setShowEndForm(false);
+    setEndNote("");
+  };
+
+  const confirmEndMeal = async () => {
+    await flushSessionSave();
+    const meal = {
+      id: uid(),
+      date: session.startedAt || todayISO(),
+      pieces: session.pieces,
+      note: endNote.trim(),
+    };
+    const next = [meal, ...meals];
+    saveMeals(next);
+    saveSession({ pieces: 0, startedAt: todayISO(), note: "" });
+    setShowEndForm(false);
+    setEndNote("");
+    showToast(`Comida guardada: ${meal.pieces} piezas`);
+  };
+
+  const deleteMeal = (id) => {
+    saveMeals(meals.filter((m) => m.id !== id));
+  };
+
+  const addPastMeal = () => {
+    const n = parseInt(newPieces, 10);
+    if (!newDate || !n || n <= 0) {
+      showToast("Indica fecha y número de piezas válidos");
+      return;
+    }
+    const meal = { id: uid(), date: newDate, pieces: n, note: newNote.trim() };
+    saveMeals([meal, ...meals].sort((a, b) => (a.date < b.date ? 1 : -1)));
+    setNewPieces("");
+    setNewDate(todayISO());
+    setNewNote("");
+    setShowAddForm(false);
+    showToast("Comida pasada añadida");
+  };
+
+  const yearMeals = meals.filter((m) => m.date.slice(0, 4) === String(YEAR_NOW));
+  const totalYear = yearMeals.reduce((s, m) => s + m.pieces, 0);
+  const totalAll = meals.reduce((s, m) => s + m.pieces, 0);
+  const mealsCountYear = yearMeals.length;
+  const avgPerMeal = mealsCountYear ? (totalYear / mealsCountYear).toFixed(1) : "0.0";
+  const levelTotal = totalAll + session.pieces;
+  const { current: levelNow, next: levelNext, progressed } = getLevelInfo(levelTotal);
+
+  const monthTotals = Array(12).fill(0);
+  yearMeals.forEach((m) => {
+    const mo = parseInt(m.date.slice(5, 7), 10) - 1;
+    if (mo >= 0 && mo < 12) monthTotals[mo] += m.pieces;
+  });
+  const maxMonth = Math.max(1, ...monthTotals);
+
+  const sortedMeals = [...meals].sort((a, b) => (a.date < b.date ? 1 : -1));
+
+  const growScale = Math.min(1 + session.pieces * 0.028, 1.9).toFixed(3);
+
+  if (loading) {
+    return (
+      <div className="sc-root sc-loading">
+        <style>{CSS}</style>
+        <Loader2 className="sc-spin" size={28} />
+        <p>Preparando el mostrador…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sc-root">
+      <style>{CSS}</style>
+      <div className="sc-waves" aria-hidden="true" />
+
+      <header className="sc-header">
+        <div className="sc-header-mark">
+          <SushiPiece type={pieceType} size={26} />
+        </div>
+        <div>
+          <h1>Sushi Counter</h1>
+          <p className="sc-sub">寿司カウンター ・ registra cada pieza</p>
+        </div>
+      </header>
+
+      <nav className="sc-tabs" role="tablist">
+        {[
+          { id: "hoy", label: "Hoy" },
+          { id: "piezas", label: "Piezas" },
+          { id: "historial", label: "Historial" },
+          { id: "stats", label: "Estadísticas" },
+        ].map((t) => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            className={`sc-tab ${tab === t.id ? "sc-tab-active" : ""}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <main className="sc-main">
+        {tab === "hoy" && (
+          <section className="sc-card sc-card-center">
+            <p className="sc-label">Piezas de esta comida</p>
+            <div className="sc-count">{session.pieces}</div>
+
+            <div className="sc-stamp-wrap">
+              {ripples.map((id) => (
+                <span key={id} className="sc-ripple" onAnimationEnd={() => removeRipple(id)} />
+              ))}
+              {pops.map((p) => (
+                <span
+                  key={p.id}
+                  className="sc-pop"
+                  style={{ "--pop-x": `${p.x}px` }}
+                  onAnimationEnd={() => removePop(p.id)}
+                >
+                  +1
+                </span>
+              ))}
+              <button type="button" className="sc-plate" onClick={stamp} aria-label="Añadir una pieza">
+                <span className="sc-piece-grow" style={{ transform: `scale(${growScale})` }}>
+                  <SushiPiece type={pieceType} size={92} />
+                </span>
+              </button>
+            </div>
+            <p className="sc-hint">Toca la pieza por cada bocado</p>
+
+            <div className="sc-level-chip">
+              <span>{levelNow.emoji}</span> {levelNow.label}
+            </div>
+
+            <div className="sc-row-actions">
+              <button className="sc-minor" onClick={correctMinus} disabled={session.pieces === 0}>
+                <Minus size={16} /> Corregir
+              </button>
+            </div>
+
+            {!showEndForm ? (
+              <button className="sc-primary" onClick={openEndForm}>
+                <Check size={18} /> Terminar comida
+              </button>
+            ) : (
+              <div className="sc-form sc-end-form">
+                <label>
+                  Concepto (opcional)
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="p. ej. Cena con amigos, Nozomi Sushi…"
+                    value={endNote}
+                    onChange={(e) => setEndNote(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && confirmEndMeal()}
+                    maxLength={60}
+                  />
+                </label>
+                <div className="sc-end-actions">
+                  <button className="sc-minor" onClick={cancelEndForm}>
+                    <X size={16} /> Cancelar
+                  </button>
+                  <button className="sc-primary sc-primary-sm" onClick={confirmEndMeal}>
+                    <Check size={16} /> Guardar comida
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="sc-divider" />
+            <div className="sc-yearline">
+              <span>Total {YEAR_NOW}</span>
+              <strong>{totalYear} piezas</strong>
+            </div>
+          </section>
+        )}
+
+        {tab === "piezas" && (
+          <section className="sc-card">
+            <p className="sc-label">Elige tu pieza favorita</p>
+            <p className="sc-hint" style={{ marginBottom: 16 }}>Se usará como sello y como icono de la app</p>
+            <div className="sc-piece-grid">
+              {PIECE_TYPES.map((pt) => (
+                <button
+                  key={pt.id}
+                  className={`sc-piece-card ${pieceType === pt.id ? "sc-piece-card-active" : ""}`}
+                  onClick={() => changePieceType(pt.id)}
+                >
+                  <SushiPiece type={pt.id} size={54} />
+                  <span>{pt.label}</span>
+                  {pieceType === pt.id && <em className="sc-piece-check"><Check size={12} /></em>}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {tab === "historial" && (
+          <section className="sc-card">
+            <div className="sc-hist-header">
+              <p className="sc-label">Comidas registradas</p>
+              <button className="sc-addbtn" onClick={() => setShowAddForm((s) => !s)}>
+                {showAddForm ? <X size={16} /> : <CalendarPlus size={16} />}
+                {showAddForm ? "Cancelar" : "Comida pasada"}
+              </button>
+            </div>
+
+            {showAddForm && (
+              <div className="sc-form">
+                <label>
+                  Fecha
+                  <input type="date" value={newDate} max={todayISO()} onChange={(e) => setNewDate(e.target.value)} />
+                </label>
+                <label>
+                  Piezas
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="p. ej. 12"
+                    value={newPieces}
+                    onChange={(e) => setNewPieces(e.target.value)}
+                  />
+                </label>
+                <label>
+                  Concepto (opcional)
+                  <input
+                    type="text"
+                    placeholder="p. ej. Cumpleaños de Ana"
+                    value={newNote}
+                    onChange={(e) => setNewNote(e.target.value)}
+                    maxLength={60}
+                  />
+                </label>
+                <button className="sc-primary sc-primary-sm" onClick={addPastMeal}>
+                  Guardar comida
+                </button>
+              </div>
+            )}
+
+            {sortedMeals.length === 0 ? (
+              <p className="sc-empty">Aún no hay comidas guardadas. Termina una comida o añade una pasada.</p>
+            ) : (
+              <ul className="sc-list">
+                {sortedMeals.map((m) => (
+                  <li key={m.id} className="sc-item">
+                    <div>
+                      <p className="sc-item-date">{formatDate(m.date)}</p>
+                      {m.note && <p className="sc-item-note">{m.note}</p>}
+                      <p className="sc-item-pieces">{m.pieces} piezas</p>
+                    </div>
+                    <button className="sc-trash" onClick={() => deleteMeal(m.id)} aria-label="Eliminar">
+                      <Trash2 size={16} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
+        {tab === "stats" && (
+          <section className="sc-card">
+            <p className="sc-label">Resumen de {YEAR_NOW}</p>
+            <div className="sc-stat-grid">
+              <div className="sc-stat">
+                <strong>{totalYear}</strong>
+                <span>piezas este año</span>
+              </div>
+              <div className="sc-stat">
+                <strong>{mealsCountYear}</strong>
+                <span>comidas este año</span>
+              </div>
+              <div className="sc-stat">
+                <strong>{avgPerMeal}</strong>
+                <span>piezas / comida</span>
+              </div>
+              <div className="sc-stat">
+                <strong>{totalAll}</strong>
+                <span>piezas en total</span>
+              </div>
+            </div>
+
+            <div className="sc-divider" />
+            <p className="sc-label">Tu nivel</p>
+            <div className="sc-level-card">
+              <div className="sc-level-top">
+                <span className="sc-level-emoji">{levelNow.emoji}</span>
+                <div>
+                  <strong>{levelNow.label}</strong>
+                  <p>{levelTotal} piezas acumuladas</p>
+                </div>
+              </div>
+              {levelNext && (
+                <>
+                  <div className="sc-progress-track">
+                    <div className="sc-progress-fill" style={{ width: `${progressed * 100}%` }} />
+                  </div>
+                  <p className="sc-level-next">{levelNext.min - levelTotal} piezas para "{levelNext.label}" {levelNext.emoji}</p>
+                </>
+              )}
+              {!levelNext && <p className="sc-level-next">¡Nivel máximo alcanzado!</p>}
+            </div>
+
+            <div className="sc-divider" />
+            <p className="sc-label">Piezas por mes</p>
+            <div className="sc-bars">
+              {monthTotals.map((v, i) => (
+                <div className="sc-bar-row" key={i}>
+                  <span className="sc-bar-label">{MONTHS_ES[i]}</span>
+                  <div className="sc-bar-track">
+                    <div className="sc-bar-fill" style={{ width: `${(v / maxMonth) * 100}%` }} />
+                  </div>
+                  <span className="sc-bar-value">{v}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+      </main>
+
+      {toast && <div className="sc-toast">{toast}</div>}
+    </div>
+  );
+}
+
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap');
+
+.sc-root {
+  --washi: #F3EAD8;
+  --washi-2: #EBDFC7;
+  --sumi: #221E1A;
+  --shu: #C1402A;
+  --shu-dark: #9C3020;
+  --ai: #2B4A6F;
+  --gold: #B4863C;
+  --line: rgba(34,30,26,0.14);
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  color: var(--sumi);
+  background: var(--washi);
+  min-height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+  position: relative;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+.sc-root * { box-sizing: border-box; }
+
+.sc-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 300px;
+  color: var(--sumi);
+}
+.sc-spin { animation: sc-spin 1s linear infinite; color: var(--shu); }
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+
+.sc-waves {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image: radial-gradient(circle at 0 0, transparent 8px, var(--washi-2) 9px, var(--washi-2) 10px, transparent 11px);
+  background-size: 28px 28px;
+  background-position: 0 0, 14px 14px;
+  mask-image: linear-gradient(to bottom, black, transparent 70%);
+}
+
+.sc-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  position: relative;
+}
+.sc-header-mark {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15), inset 0 0 0 1px var(--line);
+}
+.sc-header h1 {
+  font-family: 'Shippori Mincho', serif;
+  font-weight: 800;
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+.sc-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ai);
+  letter-spacing: 0.5px;
+}
+
+.sc-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 1;
+}
+.sc-tab {
+  flex: 1;
+  padding: 9px 6px;
+  border: 1px solid var(--line);
+  background: var(--washi-2);
+  color: var(--sumi);
+  border-radius: 999px;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.sc-tab-active {
+  background: var(--sumi);
+  color: var(--washi);
+  border-color: var(--sumi);
+}
+
+.sc-main { position: relative; z-index: 1; }
+
+.sc-card {
+  background: #FBF7EE;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 20px 18px 22px;
+  box-shadow: 0 4px 18px rgba(34,30,26,0.06);
+}
+.sc-card-center { display: flex; flex-direction: column; align-items: center; text-align: center; }
+
+.sc-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--ai);
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.sc-count {
+  font-family: 'Shippori Mincho', serif;
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+  margin-bottom: 14px;
+  color: var(--sumi);
+}
+
+.sc-stamp-wrap {
+  position: relative;
+  width: 170px;
+  height: 170px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+  touch-action: manipulation;
+}
+.sc-plate {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  border: none;
+  background: radial-gradient(circle at 40% 35%, #ffffff, #EDE3CC 78%);
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(34,30,26,0.18), inset 0 0 0 1px var(--line), inset 0 0 0 8px var(--washi);
+  transition: transform 0.08s ease;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sc-plate:active { transform: scale(0.94); }
+
+.sc-piece-grow {
+  display: flex;
+  transition: transform 0.35s cubic-bezier(.34,1.56,.64,1);
+}
+
+.sc-ripple {
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  border: 2px solid var(--shu);
+  opacity: 0.7;
+  animation: sc-ripple-anim 0.6s ease-out forwards;
+  z-index: 1;
+}
+@keyframes sc-ripple-anim {
+  to { transform: scale(1.4); opacity: 0; }
+}
+
+.sc-pop {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  font-family: 'Shippori Mincho', serif;
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--shu-dark);
+  z-index: 3;
+  animation: sc-pop-anim 0.6s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes sc-pop-anim {
+  0% { opacity: 1; transform: translate(calc(-50% + var(--pop-x)), 0); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--pop-x)), -34px); }
+}
+
+.sc-hint {
+  font-size: 12px;
+  color: var(--sumi);
+  opacity: 0.55;
+  margin: 0 0 14px;
+}
+
+.sc-types {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.sc-type-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--washi-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.sc-type-btn-active {
+  background: #fff;
+  border-color: var(--shu);
+  box-shadow: 0 0 0 2px rgba(193,64,42,0.18);
+}
+
+.sc-piece-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.sc-piece-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--washi-2);
+  border: 1.5px solid transparent;
+  border-radius: 14px;
+  padding: 12px 6px 10px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.sc-piece-card:active { transform: scale(0.96); }
+.sc-piece-card-active {
+  background: #fff;
+  border-color: var(--shu);
+  box-shadow: 0 3px 10px rgba(193,64,42,0.18);
+}
+.sc-piece-card span {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--sumi);
+}
+.sc-piece-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--shu);
+  color: var(--washi);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sc-level-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--washi-2);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ai);
+  margin-bottom: 14px;
+}
+
+.sc-row-actions { margin-bottom: 12px; }
+.sc-minor {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--sumi);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sc-minor:disabled { opacity: 0.35; cursor: default; }
+
+.sc-primary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--ai);
+  color: var(--washi);
+  border: none;
+  padding: 13px 16px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  box-shadow: 0 3px 10px rgba(43,74,111,0.25);
+}
+.sc-primary-sm { padding: 10px 14px; font-size: 14px; margin-top: 4px; }
+
+.sc-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--line);
+  margin: 18px 0 14px;
+}
+
+.sc-yearline {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 14px;
+}
+.sc-yearline strong { font-family: 'Shippori Mincho', serif; font-size: 18px; color: var(--shu-dark); }
+
+.sc-hist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.sc-addbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--shu);
+  color: var(--washi);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sc-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--washi-2);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.sc-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ai);
+  font-weight: 600;
+}
+.sc-form input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 14px;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  background: #fff;
+  color: var(--sumi);
+}
+
+.sc-end-form { align-items: stretch; }
+.sc-end-actions {
+  display: flex;
+  gap: 8px;
+}
+.sc-end-actions .sc-minor { flex: none; }
+.sc-end-actions .sc-primary-sm { flex: 1; margin-top: 0; }
+
+.sc-empty {
+  font-size: 13px;
+  color: var(--sumi);
+  opacity: 0.6;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.sc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--washi-2);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.sc-note-field {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  text-align: left;
+}
+.sc-note-field label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ai);
+}
+.sc-note-field input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 13.5px;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  background: #fff;
+  color: var(--sumi);
+}
+
+.sc-item-date { margin: 0; font-size: 13px; font-weight: 600; }
+.sc-item-note { margin: 2px 0 0; font-size: 11.5px; color: var(--sumi); opacity: 0.65; font-style: italic; }
+.sc-item-pieces { margin: 2px 0 0; font-size: 12px; color: var(--shu-dark); }
+.sc-trash {
+  background: transparent;
+  border: none;
+  color: var(--sumi);
+  opacity: 0.5;
+  cursor: pointer;
+  padding: 6px;
+}
+.sc-trash:hover { opacity: 1; color: var(--shu); }
+
+.sc-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+.sc-stat {
+  background: var(--washi-2);
+  border-radius: 12px;
+  padding: 14px 10px;
+  text-align: center;
+}
+.sc-stat strong {
+  display: block;
+  font-family: 'Shippori Mincho', serif;
+  font-size: 26px;
+  color: var(--shu-dark);
+}
+.sc-stat span {
+  font-size: 11px;
+  color: var(--ai);
+  font-weight: 600;
+}
+
+.sc-level-card {
+  background: var(--washi-2);
+  border-radius: 12px;
+  padding: 14px;
+}
+.sc-level-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.sc-level-emoji { font-size: 30px; }
+.sc-level-top strong { display: block; font-size: 14.5px; }
+.sc-level-top p { margin: 2px 0 0; font-size: 12px; color: var(--ai); }
+.sc-progress-track {
+  height: 8px;
+  background: #fff;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.sc-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--shu));
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.sc-level-next {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--sumi);
+  opacity: 0.7;
+}
+
+.sc-bars { display: flex; flex-direction: column; gap: 8px; }
+.sc-bar-row {
+  display: grid;
+  grid-template-columns: 34px 1fr 26px;
+  align-items: center;
+  gap: 8px;
+}
+.sc-bar-label { font-size: 11px; color: var(--sumi); opacity: 0.7; }
+.sc-bar-track {
+  height: 10px;
+  background: var(--washi-2);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.sc-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold), var(--shu));
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.sc-bar-value { font-size: 11px; text-align: right; opacity: 0.75; }
+
+.sc-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  background: var(--sumi);
+  color: var(--washi);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+  z-index: 50;
+  max-width: 90%;
+  text-align: center;
+}
+`;
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<SushiCounter />);
+</script>
+</body>
+</html>
