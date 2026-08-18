@@ -12,13 +12,48 @@
 <style>
   html, body { margin: 0; padding: 0; background: #F3EAD8; min-height: 100vh; }
   #root { min-height: 100vh; }
+  #boot-error { display:none; font-family: sans-serif; max-width: 480px; margin: 40px auto; padding: 18px 20px; background: #fff3f0; border: 1px solid #e2a898; border-radius: 12px; color: #7a2c1c; white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
 </style>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+<script>
+  function showBootError(msg) {
+    window.__bootErrorShown = true;
+    function paint() {
+      var box = document.getElementById("boot-error");
+      if (!box) return;
+      box.style.display = "block";
+      box.textContent = "⚠️ La app no ha podido arrancar:\n\n" + msg +
+        "\n\nComprueba tu conexión a internet (React y Babel se cargan desde internet) y revisa la consola del navegador (F12 → Console) para más detalles.";
+    }
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", paint);
+    } else {
+      paint();
+    }
+  }
+  window.addEventListener("error", function (e) {
+    showBootError((e.message || "Error desconocido") + (e.filename ? "\n(" + e.filename + ":" + e.lineno + ")" : ""));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    showBootError("Promesa rechazada: " + (e.reason && e.reason.message ? e.reason.message : e.reason));
+  });
+</script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous" onerror="showBootError('No se pudo cargar React desde unpkg.com. Revisa tu conexión a internet o si algo bloquea unpkg.com (firewall, red de empresa/colegio, bloqueador de anuncios).')"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous" onerror="showBootError('No se pudo cargar ReactDOM desde unpkg.com. Revisa tu conexión a internet o si algo bloquea unpkg.com.')"></script>
 </head>
 <body>
 <div id="root"></div>
+<div id="boot-error"></div>
+
+<script>
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      var root = document.getElementById("root");
+      if (root && root.children.length === 0 && !window.__bootErrorShown) {
+        showBootError("La app tardó demasiado en arrancar. Puede que React/Babel no se cargaran, o que haya un error en el código (revisa F12 → Console).");
+      }
+    }, 4000);
+  });
+</script>
 
 <script>
   // --- Shim de almacenamiento persistente usando localStorage del propio dispositivo ---
@@ -56,61 +91,68 @@
   }
 </script>
 
-<script type="text/babel" data-presets="react">
+<script>
 const { useState, useEffect, useCallback, useRef } = React;
-
-// --- Iconos propios (sustituyen a lucide-react para no depender de un empaquetador) ---
 function iconProps(size, extra) {
   return Object.assign({
-    width: size || 16, height: size || 16, viewBox: "0 0 24 24",
-    fill: "none", stroke: "currentColor", strokeWidth: 2.2,
-    strokeLinecap: "round", strokeLinejoin: "round"
+    width: size || 16,
+    height: size || 16,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2.2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
   }, extra || {});
 }
-function Minus(props) { return <svg {...iconProps(props.size, props)}><line x1="5" y1="12" x2="19" y2="12" /></svg>; }
-function Check(props) { return <svg {...iconProps(props.size, props)}><polyline points="20 6 9 17 4 12" /></svg>; }
-function X(props) { return <svg {...iconProps(props.size, props)}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>; }
-function Trash2(props) { return <svg {...iconProps(props.size, props)}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></svg>; }
-function CalendarPlus(props) { return <svg {...iconProps(props.size, props)}><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="12" y1="14" x2="12" y2="20" /><line x1="9" y1="17" x2="15" y2="17" /></svg>; }
-function Loader2(props) { return <svg {...iconProps(props.size, props)} className={props.className}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>; }
-
-
-const YEAR_NOW = new Date().getFullYear();
-const MONTHS_ES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-
+function Minus(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props) }, /* @__PURE__ */ React.createElement("line", { x1: "5", y1: "12", x2: "19", y2: "12" }));
+}
+function Check(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props) }, /* @__PURE__ */ React.createElement("polyline", { points: "20 6 9 17 4 12" }));
+}
+function X(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props) }, /* @__PURE__ */ React.createElement("line", { x1: "18", y1: "6", x2: "6", y2: "18" }), /* @__PURE__ */ React.createElement("line", { x1: "6", y1: "6", x2: "18", y2: "18" }));
+}
+function Trash2(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props) }, /* @__PURE__ */ React.createElement("polyline", { points: "3 6 5 6 21 6" }), /* @__PURE__ */ React.createElement("path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }), /* @__PURE__ */ React.createElement("path", { d: "M10 11v6" }), /* @__PURE__ */ React.createElement("path", { d: "M14 11v6" }), /* @__PURE__ */ React.createElement("path", { d: "M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" }));
+}
+function CalendarPlus(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props) }, /* @__PURE__ */ React.createElement("rect", { x: "3", y: "4", width: "18", height: "18", rx: "2" }), /* @__PURE__ */ React.createElement("line", { x1: "16", y1: "2", x2: "16", y2: "6" }), /* @__PURE__ */ React.createElement("line", { x1: "8", y1: "2", x2: "8", y2: "6" }), /* @__PURE__ */ React.createElement("line", { x1: "3", y1: "10", x2: "21", y2: "10" }), /* @__PURE__ */ React.createElement("line", { x1: "12", y1: "14", x2: "12", y2: "20" }), /* @__PURE__ */ React.createElement("line", { x1: "9", y1: "17", x2: "15", y2: "17" }));
+}
+function Loader2(props) {
+  return /* @__PURE__ */ React.createElement("svg", { ...iconProps(props.size, props), className: props.className }, /* @__PURE__ */ React.createElement("path", { d: "M21 12a9 9 0 1 1-6.219-8.56" }));
+}
+const YEAR_NOW = (/* @__PURE__ */ new Date()).getFullYear();
+const MONTHS_ES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const PIECE_TYPES = [
-  { id: "salmon", label: "Salmón" },
-  { id: "tuna", label: "Atún" },
+  { id: "salmon", label: "Salm\xF3n" },
+  { id: "tuna", label: "At\xFAn" },
   { id: "maki", label: "Maki" },
   { id: "gunkan", label: "Gunkan" },
   { id: "tamago", label: "Tamago" },
-  { id: "temaki", label: "Temaki" },
+  { id: "temaki", label: "Temaki" }
 ];
-
 const LEVELS = [
-  { min: 0, label: "Aprendiz de palillos", emoji: "🥢" },
-  { min: 50, label: "Aficionado", emoji: "🍣" },
-  { min: 150, label: "Fan del sushi", emoji: "🍱" },
-  { min: 400, label: "Maestro Itamae", emoji: "🔪" },
-  { min: 1000, label: "Leyenda del sushi", emoji: "🐉" },
+  { min: 0, label: "Aprendiz de palillos", emoji: "\u{1F962}" },
+  { min: 50, label: "Aficionado", emoji: "\u{1F363}" },
+  { min: 150, label: "Fan del sushi", emoji: "\u{1F371}" },
+  { min: 400, label: "Maestro Itamae", emoji: "\u{1F52A}" },
+  { min: 1e3, label: "Leyenda del sushi", emoji: "\u{1F409}" }
 ];
-
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
-
 function formatDate(iso) {
-  const d = new Date(iso + "T00:00:00");
+  const d = /* @__PURE__ */ new Date(iso + "T00:00:00");
   return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 }
-
 function todayISO() {
-  const d = new Date();
+  const d = /* @__PURE__ */ new Date();
   const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60000);
+  const local = new Date(d.getTime() - off * 6e4);
   return local.toISOString().slice(0, 10);
 }
-
 function getLevelInfo(total) {
   let current = LEVELS[0];
   let next = LEVELS[1];
@@ -124,102 +166,39 @@ function getLevelInfo(total) {
   const progressed = next ? Math.min(1, (total - current.min) / span) : 1;
   return { current, next, progressed };
 }
-
 function Face({ cx, cy, spread = 8, tone = "closed", blush = 5, mouth = "smile" }) {
   const ex = spread;
   const bl = blush;
-  return (
-    <g>
-      {tone === "closed" ? (
-        <path
-          d={`M${cx - ex - 2} ${cy} Q${cx - ex} ${cy - 3.4} ${cx - ex + 2} ${cy} M${cx + ex - 2} ${cy} Q${cx + ex} ${cy - 3.4} ${cx + ex + 2} ${cy}`}
-          stroke="#241F1A"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          fill="none"
-        />
-      ) : (
-        <>
-          <circle cx={cx - ex} cy={cy} r="1.9" fill="#241F1A" />
-          <circle cx={cx + ex} cy={cy} r="1.9" fill="#241F1A" />
-          <circle cx={cx - ex + 0.6} cy={cy - 0.6} r="0.6" fill="#fff" />
-          <circle cx={cx + ex + 0.6} cy={cy - 0.6} r="0.6" fill="#fff" />
-        </>
-      )}
-      <ellipse cx={cx - ex - bl} cy={cy + 4} rx="3.4" ry="2.2" fill="#FF9EA6" opacity="0.55" />
-      <ellipse cx={cx + ex + bl} cy={cy + 4} rx="3.4" ry="2.2" fill="#FF9EA6" opacity="0.55" />
-      {mouth === "smile" ? (
-        <path d={`M${cx - 3} ${cy + 4.5} Q${cx} ${cy + 7.5} ${cx + 3} ${cy + 4.5}`} stroke="#241F1A" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-      ) : (
-        <ellipse cx={cx} cy={cy + 5.5} rx="1.6" ry="2" fill="#241F1A" />
-      )}
-    </g>
-  );
+  return /* @__PURE__ */ React.createElement("g", null, tone === "closed" ? /* @__PURE__ */ React.createElement(
+    "path",
+    {
+      d: `M${cx - ex - 2} ${cy} Q${cx - ex} ${cy - 3.4} ${cx - ex + 2} ${cy} M${cx + ex - 2} ${cy} Q${cx + ex} ${cy - 3.4} ${cx + ex + 2} ${cy}`,
+      stroke: "#241F1A",
+      strokeWidth: "1.6",
+      strokeLinecap: "round",
+      fill: "none"
+    }
+  ) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("circle", { cx: cx - ex, cy, r: "1.9", fill: "#241F1A" }), /* @__PURE__ */ React.createElement("circle", { cx: cx + ex, cy, r: "1.9", fill: "#241F1A" }), /* @__PURE__ */ React.createElement("circle", { cx: cx - ex + 0.6, cy: cy - 0.6, r: "0.6", fill: "#fff" }), /* @__PURE__ */ React.createElement("circle", { cx: cx + ex + 0.6, cy: cy - 0.6, r: "0.6", fill: "#fff" })), /* @__PURE__ */ React.createElement("ellipse", { cx: cx - ex - bl, cy: cy + 4, rx: "3.4", ry: "2.2", fill: "#FF9EA6", opacity: "0.55" }), /* @__PURE__ */ React.createElement("ellipse", { cx: cx + ex + bl, cy: cy + 4, rx: "3.4", ry: "2.2", fill: "#FF9EA6", opacity: "0.55" }), mouth === "smile" ? /* @__PURE__ */ React.createElement("path", { d: `M${cx - 3} ${cy + 4.5} Q${cx} ${cy + 7.5} ${cx + 3} ${cy + 4.5}`, stroke: "#241F1A", strokeWidth: "1.4", strokeLinecap: "round", fill: "none" }) : /* @__PURE__ */ React.createElement("ellipse", { cx, cy: cy + 5.5, rx: "1.6", ry: "2", fill: "#241F1A" }));
 }
-
 function SushiPiece({ type, size = 90 }) {
   const common = { width: size, height: size, viewBox: "0 0 100 100", xmlns: "http://www.w3.org/2000/svg" };
   switch (type) {
     case "tuna":
-      return (
-        <svg {...common}>
-          <path d="M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
-          <path d="M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z" fill="#8B2E2E" />
-          <Face cx={50} cy={50} spread={7} tone="closed" mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("path", { d: "M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z", fill: "#F6EFDE", stroke: "#D8C9A3", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z", fill: "#8B2E2E" }), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 50, spread: 7, tone: "closed", mouth: "smile" }));
     case "salmon":
-      return (
-        <svg {...common}>
-          <path d="M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
-          <path d="M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z" fill="#E8916B" />
-          <path d="M30 48 L34 55 M66 48 L63 55" stroke="#F2B393" strokeWidth="1.4" strokeLinecap="round" />
-          <Face cx={50} cy={51} spread={7} tone="dot" mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("path", { d: "M20 56 Q20 40 50 40 Q80 40 80 56 L80 68 Q80 79 50 79 Q20 79 20 68 Z", fill: "#F6EFDE", stroke: "#D8C9A3", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("path", { d: "M18 51 Q50 27 82 51 L78 60 Q50 42 22 60 Z", fill: "#E8916B" }), /* @__PURE__ */ React.createElement("path", { d: "M30 48 L34 55 M66 48 L63 55", stroke: "#F2B393", strokeWidth: "1.4", strokeLinecap: "round" }), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 51, spread: 7, tone: "dot", mouth: "smile" }));
     case "maki":
-      return (
-        <svg {...common}>
-          <circle cx="50" cy="52" r="33" fill="#241F1A" />
-          <circle cx="50" cy="52" r="26" fill="#F6EFDE" />
-          <circle cx="50" cy="52" r="12" fill="#6B8E5A" />
-          <Face cx={50} cy={51} spread={5} tone="dot" blush={4} mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "52", r: "33", fill: "#241F1A" }), /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "52", r: "26", fill: "#F6EFDE" }), /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "52", r: "12", fill: "#6B8E5A" }), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 51, spread: 5, tone: "dot", blush: 4, mouth: "smile" }));
     case "gunkan":
-      return (
-        <svg {...common}>
-          <circle cx="50" cy="52" r="34" fill="#241F1A" />
-          <circle cx="50" cy="52" r="27" fill="#F6EFDE" />
-          {[[38,42],[62,42],[50,36],[44,58],[56,58],[50,64]].map(([x,y],i)=>(
-            <ellipse key={i} cx={x} cy={y} rx="3.2" ry="2.6" fill="#D98A2B" stroke="#B4691A" strokeWidth="0.6" />
-          ))}
-          <Face cx={50} cy={62} spread={6} tone="closed" mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "52", r: "34", fill: "#241F1A" }), /* @__PURE__ */ React.createElement("circle", { cx: "50", cy: "52", r: "27", fill: "#F6EFDE" }), [[38, 42], [62, 42], [50, 36], [44, 58], [56, 58], [50, 64]].map(([x, y], i) => /* @__PURE__ */ React.createElement("ellipse", { key: i, cx: x, cy: y, rx: "3.2", ry: "2.6", fill: "#D98A2B", stroke: "#B4691A", strokeWidth: "0.6" })), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 62, spread: 6, tone: "closed", mouth: "smile" }));
     case "tamago":
-      return (
-        <svg {...common}>
-          <path d="M20 58 Q20 42 50 42 Q80 42 80 58 L80 69 Q80 79 50 79 Q20 79 20 69 Z" fill="#F6EFDE" stroke="#D8C9A3" strokeWidth="1.5" />
-          <rect x="23" y="30" width="54" height="24" rx="5" fill="#E8C34A" stroke="#C9A22E" strokeWidth="1" />
-          <rect x="20" y="50" width="60" height="9" fill="#241F1A" />
-          <Face cx={50} cy={40} spread={7} tone="dot" blush={4} mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("path", { d: "M20 58 Q20 42 50 42 Q80 42 80 58 L80 69 Q80 79 50 79 Q20 79 20 69 Z", fill: "#F6EFDE", stroke: "#D8C9A3", strokeWidth: "1.5" }), /* @__PURE__ */ React.createElement("rect", { x: "23", y: "30", width: "54", height: "24", rx: "5", fill: "#E8C34A", stroke: "#C9A22E", strokeWidth: "1" }), /* @__PURE__ */ React.createElement("rect", { x: "20", y: "50", width: "60", height: "9", fill: "#241F1A" }), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 40, spread: 7, tone: "dot", blush: 4, mouth: "smile" }));
     case "temaki":
-      return (
-        <svg {...common}>
-          <path d="M50 14 L86 82 L14 82 Z" fill="#241F1A" />
-          <path d="M50 26 L73 74 L27 74 Z" fill="#F6EFDE" />
-          <path d="M40 32 Q50 22 60 32 L57 47 Q50 39 43 47 Z" fill="#E8916B" />
-          <Face cx={50} cy={58} spread={7} tone="closed" mouth="smile" />
-        </svg>
-      );
+      return /* @__PURE__ */ React.createElement("svg", { ...common }, /* @__PURE__ */ React.createElement("path", { d: "M50 14 L86 82 L14 82 Z", fill: "#241F1A" }), /* @__PURE__ */ React.createElement("path", { d: "M50 26 L73 74 L27 74 Z", fill: "#F6EFDE" }), /* @__PURE__ */ React.createElement("path", { d: "M40 32 Q50 22 60 32 L57 47 Q50 39 43 47 Z", fill: "#E8916B" }), /* @__PURE__ */ React.createElement(Face, { cx: 50, cy: 58, spread: 7, tone: "closed", mouth: "smile" }));
     default:
       return null;
   }
 }
-
 function SushiCounter() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("hoy");
@@ -238,7 +217,6 @@ function SushiCounter() {
   const toastTimer = useRef(null);
   const saveTimer = useRef(null);
   const pendingSessionRef = useRef(null);
-
   const flushSessionSave = useCallback(async () => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -248,18 +226,16 @@ function SushiCounter() {
       try {
         await window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false);
       } catch (e) {
-        console.error("Error guardando sesión", e);
+        console.error("Error guardando sesi\xF3n", e);
       }
       pendingSessionRef.current = null;
     }
   }, []);
-
   const persistSessionSoon = useCallback((data) => {
     pendingSessionRef.current = data;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(flushSessionSave, 350);
   }, [flushSessionSave]);
-
   useEffect(() => {
     (async () => {
       try {
@@ -267,20 +243,20 @@ function SushiCounter() {
         try {
           const r = await window.storage.get("meals", false);
           if (r && r.value) mealsData = JSON.parse(r.value);
-        } catch (e) {}
-
+        } catch (e) {
+        }
         let sessionData = { pieces: 0, startedAt: todayISO(), note: "" };
         try {
           const r2 = await window.storage.get("current-session", false);
           if (r2 && r2.value) sessionData = JSON.parse(r2.value);
-        } catch (e) {}
-
+        } catch (e) {
+        }
         let type = "salmon";
         try {
           const r3 = await window.storage.get("piece-type", false);
           if (r3 && r3.value) type = JSON.parse(r3.value);
-        } catch (e) {}
-
+        } catch (e) {
+        }
         setMeals(mealsData);
         setSession(sessionData);
         setPieceType(type);
@@ -291,16 +267,15 @@ function SushiCounter() {
       }
     })();
   }, []);
-
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       if (pendingSessionRef.current) {
-        window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false).catch(() => {});
+        window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false).catch(() => {
+        });
       }
     };
   }, []);
-
   const saveMeals = useCallback(async (next) => {
     setMeals(next);
     try {
@@ -309,16 +284,14 @@ function SushiCounter() {
       console.error("Error guardando comidas", e);
     }
   }, []);
-
   const saveSession = useCallback(async (next) => {
     setSession(next);
     try {
       await window.storage.set("current-session", JSON.stringify(next), false);
     } catch (e) {
-      console.error("Error guardando sesión", e);
+      console.error("Error guardando sesi\xF3n", e);
     }
   }, []);
-
   const changePieceType = useCallback(async (type) => {
     setPieceType(type);
     try {
@@ -327,16 +300,11 @@ function SushiCounter() {
       console.error("Error guardando tipo de pieza", e);
     }
   }, []);
-
   const showToast = (msg) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2400);
   };
-
-  // Toque en el sello: actualización funcional para que cada toque cuente
-  // aunque lleguen muy seguidos, y el guardado real se agrupa (debounce)
-  // para no saturar el almacenamiento con toques rápidos.
   const stamp = () => {
     setSession((prev) => {
       const next = { ...prev, pieces: prev.pieces + 1 };
@@ -348,10 +316,8 @@ function SushiCounter() {
     setPops((p) => [...p, { id, x: Math.round((Math.random() - 0.5) * 30) }]);
     if (navigator.vibrate) navigator.vibrate(8);
   };
-
   const removeRipple = (id) => setRipples((r) => r.filter((x) => x !== id));
   const removePop = (id) => setPops((p) => p.filter((x) => x.id !== id));
-
   const correctMinus = () => {
     setSession((prev) => {
       if (prev.pieces <= 0) return prev;
@@ -360,28 +326,25 @@ function SushiCounter() {
       return next;
     });
   };
-
   const openEndForm = () => {
     if (session.pieces <= 0) {
-      showToast("Añade alguna pieza antes de terminar la comida");
+      showToast("A\xF1ade alguna pieza antes de terminar la comida");
       return;
     }
     setEndNote("");
     setShowEndForm(true);
   };
-
   const cancelEndForm = () => {
     setShowEndForm(false);
     setEndNote("");
   };
-
   const confirmEndMeal = async () => {
     await flushSessionSave();
     const meal = {
       id: uid(),
       date: session.startedAt || todayISO(),
       pieces: session.pieces,
-      note: endNote.trim(),
+      note: endNote.trim()
     };
     const next = [meal, ...meals];
     saveMeals(next);
@@ -390,26 +353,23 @@ function SushiCounter() {
     setEndNote("");
     showToast(`Comida guardada: ${meal.pieces} piezas`);
   };
-
   const deleteMeal = (id) => {
     saveMeals(meals.filter((m) => m.id !== id));
   };
-
   const addPastMeal = () => {
     const n = parseInt(newPieces, 10);
     if (!newDate || !n || n <= 0) {
-      showToast("Indica fecha y número de piezas válidos");
+      showToast("Indica fecha y n\xFAmero de piezas v\xE1lidos");
       return;
     }
     const meal = { id: uid(), date: newDate, pieces: n, note: newNote.trim() };
-    saveMeals([meal, ...meals].sort((a, b) => (a.date < b.date ? 1 : -1)));
+    saveMeals([meal, ...meals].sort((a, b) => a.date < b.date ? 1 : -1));
     setNewPieces("");
     setNewDate(todayISO());
     setNewNote("");
     setShowAddForm(false);
-    showToast("Comida pasada añadida");
+    showToast("Comida pasada a\xF1adida");
   };
-
   const yearMeals = meals.filter((m) => m.date.slice(0, 4) === String(YEAR_NOW));
   const totalYear = yearMeals.reduce((s, m) => s + m.pieces, 0);
   const totalAll = meals.reduce((s, m) => s + m.pieces, 0);
@@ -417,285 +377,82 @@ function SushiCounter() {
   const avgPerMeal = mealsCountYear ? (totalYear / mealsCountYear).toFixed(1) : "0.0";
   const levelTotal = totalAll + session.pieces;
   const { current: levelNow, next: levelNext, progressed } = getLevelInfo(levelTotal);
-
   const monthTotals = Array(12).fill(0);
   yearMeals.forEach((m) => {
     const mo = parseInt(m.date.slice(5, 7), 10) - 1;
     if (mo >= 0 && mo < 12) monthTotals[mo] += m.pieces;
   });
   const maxMonth = Math.max(1, ...monthTotals);
-
-  const sortedMeals = [...meals].sort((a, b) => (a.date < b.date ? 1 : -1));
-
+  const sortedMeals = [...meals].sort((a, b) => a.date < b.date ? 1 : -1);
   const growScale = Math.min(1 + session.pieces * 0.028, 1.9).toFixed(3);
-
   if (loading) {
-    return (
-      <div className="sc-root sc-loading">
-        <style>{CSS}</style>
-        <Loader2 className="sc-spin" size={28} />
-        <p>Preparando el mostrador…</p>
-      </div>
-    );
+    return /* @__PURE__ */ React.createElement("div", { className: "sc-root sc-loading" }, /* @__PURE__ */ React.createElement("style", null, CSS), /* @__PURE__ */ React.createElement(Loader2, { className: "sc-spin", size: 28 }), /* @__PURE__ */ React.createElement("p", null, "Preparando el mostrador\u2026"));
   }
-
-  return (
-    <div className="sc-root">
-      <style>{CSS}</style>
-      <div className="sc-waves" aria-hidden="true" />
-
-      <header className="sc-header">
-        <div className="sc-header-mark">
-          <SushiPiece type={pieceType} size={26} />
-        </div>
-        <div>
-          <h1>Sushi Counter</h1>
-          <p className="sc-sub">寿司カウンター ・ registra cada pieza</p>
-        </div>
-      </header>
-
-      <nav className="sc-tabs" role="tablist">
-        {[
-          { id: "hoy", label: "Hoy" },
-          { id: "piezas", label: "Piezas" },
-          { id: "historial", label: "Historial" },
-          { id: "stats", label: "Estadísticas" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            className={`sc-tab ${tab === t.id ? "sc-tab-active" : ""}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      <main className="sc-main">
-        {tab === "hoy" && (
-          <section className="sc-card sc-card-center">
-            <p className="sc-label">Piezas de esta comida</p>
-            <div className="sc-count">{session.pieces}</div>
-
-            <div className="sc-stamp-wrap">
-              {ripples.map((id) => (
-                <span key={id} className="sc-ripple" onAnimationEnd={() => removeRipple(id)} />
-              ))}
-              {pops.map((p) => (
-                <span
-                  key={p.id}
-                  className="sc-pop"
-                  style={{ "--pop-x": `${p.x}px` }}
-                  onAnimationEnd={() => removePop(p.id)}
-                >
-                  +1
-                </span>
-              ))}
-              <button type="button" className="sc-plate" onClick={stamp} aria-label="Añadir una pieza">
-                <span className="sc-piece-grow" style={{ transform: `scale(${growScale})` }}>
-                  <SushiPiece type={pieceType} size={92} />
-                </span>
-              </button>
-            </div>
-            <p className="sc-hint">Toca la pieza por cada bocado</p>
-
-            <div className="sc-level-chip">
-              <span>{levelNow.emoji}</span> {levelNow.label}
-            </div>
-
-            <div className="sc-row-actions">
-              <button className="sc-minor" onClick={correctMinus} disabled={session.pieces === 0}>
-                <Minus size={16} /> Corregir
-              </button>
-            </div>
-
-            {!showEndForm ? (
-              <button className="sc-primary" onClick={openEndForm}>
-                <Check size={18} /> Terminar comida
-              </button>
-            ) : (
-              <div className="sc-form sc-end-form">
-                <label>
-                  Concepto (opcional)
-                  <input
-                    type="text"
-                    autoFocus
-                    placeholder="p. ej. Cena con amigos, Nozomi Sushi…"
-                    value={endNote}
-                    onChange={(e) => setEndNote(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && confirmEndMeal()}
-                    maxLength={60}
-                  />
-                </label>
-                <div className="sc-end-actions">
-                  <button className="sc-minor" onClick={cancelEndForm}>
-                    <X size={16} /> Cancelar
-                  </button>
-                  <button className="sc-primary sc-primary-sm" onClick={confirmEndMeal}>
-                    <Check size={16} /> Guardar comida
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="sc-divider" />
-            <div className="sc-yearline">
-              <span>Total {YEAR_NOW}</span>
-              <strong>{totalYear} piezas</strong>
-            </div>
-          </section>
-        )}
-
-        {tab === "piezas" && (
-          <section className="sc-card">
-            <p className="sc-label">Elige tu pieza favorita</p>
-            <p className="sc-hint" style={{ marginBottom: 16 }}>Se usará como sello y como icono de la app</p>
-            <div className="sc-piece-grid">
-              {PIECE_TYPES.map((pt) => (
-                <button
-                  key={pt.id}
-                  className={`sc-piece-card ${pieceType === pt.id ? "sc-piece-card-active" : ""}`}
-                  onClick={() => changePieceType(pt.id)}
-                >
-                  <SushiPiece type={pt.id} size={54} />
-                  <span>{pt.label}</span>
-                  {pieceType === pt.id && <em className="sc-piece-check"><Check size={12} /></em>}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {tab === "historial" && (
-          <section className="sc-card">
-            <div className="sc-hist-header">
-              <p className="sc-label">Comidas registradas</p>
-              <button className="sc-addbtn" onClick={() => setShowAddForm((s) => !s)}>
-                {showAddForm ? <X size={16} /> : <CalendarPlus size={16} />}
-                {showAddForm ? "Cancelar" : "Comida pasada"}
-              </button>
-            </div>
-
-            {showAddForm && (
-              <div className="sc-form">
-                <label>
-                  Fecha
-                  <input type="date" value={newDate} max={todayISO()} onChange={(e) => setNewDate(e.target.value)} />
-                </label>
-                <label>
-                  Piezas
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="p. ej. 12"
-                    value={newPieces}
-                    onChange={(e) => setNewPieces(e.target.value)}
-                  />
-                </label>
-                <label>
-                  Concepto (opcional)
-                  <input
-                    type="text"
-                    placeholder="p. ej. Cumpleaños de Ana"
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    maxLength={60}
-                  />
-                </label>
-                <button className="sc-primary sc-primary-sm" onClick={addPastMeal}>
-                  Guardar comida
-                </button>
-              </div>
-            )}
-
-            {sortedMeals.length === 0 ? (
-              <p className="sc-empty">Aún no hay comidas guardadas. Termina una comida o añade una pasada.</p>
-            ) : (
-              <ul className="sc-list">
-                {sortedMeals.map((m) => (
-                  <li key={m.id} className="sc-item">
-                    <div>
-                      <p className="sc-item-date">{formatDate(m.date)}</p>
-                      {m.note && <p className="sc-item-note">{m.note}</p>}
-                      <p className="sc-item-pieces">{m.pieces} piezas</p>
-                    </div>
-                    <button className="sc-trash" onClick={() => deleteMeal(m.id)} aria-label="Eliminar">
-                      <Trash2 size={16} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-
-        {tab === "stats" && (
-          <section className="sc-card">
-            <p className="sc-label">Resumen de {YEAR_NOW}</p>
-            <div className="sc-stat-grid">
-              <div className="sc-stat">
-                <strong>{totalYear}</strong>
-                <span>piezas este año</span>
-              </div>
-              <div className="sc-stat">
-                <strong>{mealsCountYear}</strong>
-                <span>comidas este año</span>
-              </div>
-              <div className="sc-stat">
-                <strong>{avgPerMeal}</strong>
-                <span>piezas / comida</span>
-              </div>
-              <div className="sc-stat">
-                <strong>{totalAll}</strong>
-                <span>piezas en total</span>
-              </div>
-            </div>
-
-            <div className="sc-divider" />
-            <p className="sc-label">Tu nivel</p>
-            <div className="sc-level-card">
-              <div className="sc-level-top">
-                <span className="sc-level-emoji">{levelNow.emoji}</span>
-                <div>
-                  <strong>{levelNow.label}</strong>
-                  <p>{levelTotal} piezas acumuladas</p>
-                </div>
-              </div>
-              {levelNext && (
-                <>
-                  <div className="sc-progress-track">
-                    <div className="sc-progress-fill" style={{ width: `${progressed * 100}%` }} />
-                  </div>
-                  <p className="sc-level-next">{levelNext.min - levelTotal} piezas para "{levelNext.label}" {levelNext.emoji}</p>
-                </>
-              )}
-              {!levelNext && <p className="sc-level-next">¡Nivel máximo alcanzado!</p>}
-            </div>
-
-            <div className="sc-divider" />
-            <p className="sc-label">Piezas por mes</p>
-            <div className="sc-bars">
-              {monthTotals.map((v, i) => (
-                <div className="sc-bar-row" key={i}>
-                  <span className="sc-bar-label">{MONTHS_ES[i]}</span>
-                  <div className="sc-bar-track">
-                    <div className="sc-bar-fill" style={{ width: `${(v / maxMonth) * 100}%` }} />
-                  </div>
-                  <span className="sc-bar-value">{v}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-      </main>
-
-      {toast && <div className="sc-toast">{toast}</div>}
-    </div>
-  );
+  return /* @__PURE__ */ React.createElement("div", { className: "sc-root" }, /* @__PURE__ */ React.createElement("style", null, CSS), /* @__PURE__ */ React.createElement("div", { className: "sc-waves", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("header", { className: "sc-header" }, /* @__PURE__ */ React.createElement("div", { className: "sc-header-mark" }, /* @__PURE__ */ React.createElement(SushiPiece, { type: pieceType, size: 26 })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Sushi Counter"), /* @__PURE__ */ React.createElement("p", { className: "sc-sub" }, "\u5BFF\u53F8\u30AB\u30A6\u30F3\u30BF\u30FC \u30FB registra cada pieza"))), /* @__PURE__ */ React.createElement("nav", { className: "sc-tabs", role: "tablist" }, [
+    { id: "hoy", label: "Hoy" },
+    { id: "piezas", label: "Piezas" },
+    { id: "historial", label: "Historial" },
+    { id: "stats", label: "Estad\xEDsticas" }
+  ].map((t) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: t.id,
+      role: "tab",
+      "aria-selected": tab === t.id,
+      className: `sc-tab ${tab === t.id ? "sc-tab-active" : ""}`,
+      onClick: () => setTab(t.id)
+    },
+    t.label
+  ))), /* @__PURE__ */ React.createElement("main", { className: "sc-main" }, tab === "hoy" && /* @__PURE__ */ React.createElement("section", { className: "sc-card sc-card-center" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Piezas de esta comida"), /* @__PURE__ */ React.createElement("div", { className: "sc-count" }, session.pieces), /* @__PURE__ */ React.createElement("div", { className: "sc-stamp-wrap" }, ripples.map((id) => /* @__PURE__ */ React.createElement("span", { key: id, className: "sc-ripple", onAnimationEnd: () => removeRipple(id) })), pops.map((p) => /* @__PURE__ */ React.createElement(
+    "span",
+    {
+      key: p.id,
+      className: "sc-pop",
+      style: { "--pop-x": `${p.x}px` },
+      onAnimationEnd: () => removePop(p.id)
+    },
+    "+1"
+  )), /* @__PURE__ */ React.createElement("button", { type: "button", className: "sc-plate", onClick: stamp, "aria-label": "A\xF1adir una pieza" }, /* @__PURE__ */ React.createElement("span", { className: "sc-piece-grow", style: { transform: `scale(${growScale})` } }, /* @__PURE__ */ React.createElement(SushiPiece, { type: pieceType, size: 92 })))), /* @__PURE__ */ React.createElement("p", { className: "sc-hint" }, "Toca la pieza por cada bocado"), /* @__PURE__ */ React.createElement("div", { className: "sc-level-chip" }, /* @__PURE__ */ React.createElement("span", null, levelNow.emoji), " ", levelNow.label), /* @__PURE__ */ React.createElement("div", { className: "sc-row-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: correctMinus, disabled: session.pieces === 0 }, /* @__PURE__ */ React.createElement(Minus, { size: 16 }), " Corregir")), !showEndForm ? /* @__PURE__ */ React.createElement("button", { className: "sc-primary", onClick: openEndForm }, /* @__PURE__ */ React.createElement(Check, { size: 18 }), " Terminar comida") : /* @__PURE__ */ React.createElement("div", { className: "sc-form sc-end-form" }, /* @__PURE__ */ React.createElement("label", null, "Concepto (opcional)", /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      autoFocus: true,
+      placeholder: "p. ej. Cena con amigos, Nozomi Sushi\u2026",
+      value: endNote,
+      onChange: (e) => setEndNote(e.target.value),
+      onKeyDown: (e) => e.key === "Enter" && confirmEndMeal(),
+      maxLength: 60
+    }
+  )), /* @__PURE__ */ React.createElement("div", { className: "sc-end-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: cancelEndForm }, /* @__PURE__ */ React.createElement(X, { size: 16 }), " Cancelar"), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: confirmEndMeal }, /* @__PURE__ */ React.createElement(Check, { size: 16 }), " Guardar comida"))), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("div", { className: "sc-yearline" }, /* @__PURE__ */ React.createElement("span", null, "Total ", YEAR_NOW), /* @__PURE__ */ React.createElement("strong", null, totalYear, " piezas"))), tab === "piezas" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Elige tu pieza favorita"), /* @__PURE__ */ React.createElement("p", { className: "sc-hint", style: { marginBottom: 16 } }, "Se usar\xE1 como sello y como icono de la app"), /* @__PURE__ */ React.createElement("div", { className: "sc-piece-grid" }, PIECE_TYPES.map((pt) => /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      key: pt.id,
+      className: `sc-piece-card ${pieceType === pt.id ? "sc-piece-card-active" : ""}`,
+      onClick: () => changePieceType(pt.id)
+    },
+    /* @__PURE__ */ React.createElement(SushiPiece, { type: pt.id, size: 54 }),
+    /* @__PURE__ */ React.createElement("span", null, pt.label),
+    pieceType === pt.id && /* @__PURE__ */ React.createElement("em", { className: "sc-piece-check" }, /* @__PURE__ */ React.createElement(Check, { size: 12 }))
+  )))), tab === "historial" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-hist-header" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comidas registradas"), /* @__PURE__ */ React.createElement("button", { className: "sc-addbtn", onClick: () => setShowAddForm((s) => !s) }, showAddForm ? /* @__PURE__ */ React.createElement(X, { size: 16 }) : /* @__PURE__ */ React.createElement(CalendarPlus, { size: 16 }), showAddForm ? "Cancelar" : "Comida pasada")), showAddForm && /* @__PURE__ */ React.createElement("div", { className: "sc-form" }, /* @__PURE__ */ React.createElement("label", null, "Fecha", /* @__PURE__ */ React.createElement("input", { type: "date", value: newDate, max: todayISO(), onChange: (e) => setNewDate(e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Piezas", /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "number",
+      min: "1",
+      placeholder: "p. ej. 12",
+      value: newPieces,
+      onChange: (e) => setNewPieces(e.target.value)
+    }
+  )), /* @__PURE__ */ React.createElement("label", null, "Concepto (opcional)", /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "text",
+      placeholder: "p. ej. Cumplea\xF1os de Ana",
+      value: newNote,
+      onChange: (e) => setNewNote(e.target.value),
+      maxLength: 60
+    }
+  )), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: addPastMeal }, "Guardar comida")), sortedMeals.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "sc-empty" }, "A\xFAn no hay comidas guardadas. Termina una comida o a\xF1ade una pasada.") : /* @__PURE__ */ React.createElement("ul", { className: "sc-list" }, sortedMeals.map((m) => /* @__PURE__ */ React.createElement("li", { key: m.id, className: "sc-item" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "sc-item-date" }, formatDate(m.date)), m.note && /* @__PURE__ */ React.createElement("p", { className: "sc-item-note" }, m.note), /* @__PURE__ */ React.createElement("p", { className: "sc-item-pieces" }, m.pieces, " piezas")), /* @__PURE__ */ React.createElement("button", { className: "sc-trash", onClick: () => deleteMeal(m.id), "aria-label": "Eliminar" }, /* @__PURE__ */ React.createElement(Trash2, { size: 16 })))))), tab === "stats" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Resumen de ", YEAR_NOW), /* @__PURE__ */ React.createElement("div", { className: "sc-stat-grid" }, /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, totalYear), /* @__PURE__ */ React.createElement("span", null, "piezas este a\xF1o")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, mealsCountYear), /* @__PURE__ */ React.createElement("span", null, "comidas este a\xF1o")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, avgPerMeal), /* @__PURE__ */ React.createElement("span", null, "piezas / comida")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, totalAll), /* @__PURE__ */ React.createElement("span", null, "piezas en total"))), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Tu nivel"), /* @__PURE__ */ React.createElement("div", { className: "sc-level-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-level-top" }, /* @__PURE__ */ React.createElement("span", { className: "sc-level-emoji" }, levelNow.emoji), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, levelNow.label), /* @__PURE__ */ React.createElement("p", null, levelTotal, " piezas acumuladas"))), levelNext && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-fill", style: { width: `${progressed * 100}%` } })), /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, levelNext.min - levelTotal, ' piezas para "', levelNext.label, '" ', levelNext.emoji)), !levelNext && /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, "\xA1Nivel m\xE1ximo alcanzado!")), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Piezas por mes"), /* @__PURE__ */ React.createElement("div", { className: "sc-bars" }, monthTotals.map((v, i) => /* @__PURE__ */ React.createElement("div", { className: "sc-bar-row", key: i }, /* @__PURE__ */ React.createElement("span", { className: "sc-bar-label" }, MONTHS_ES[i]), /* @__PURE__ */ React.createElement("div", { className: "sc-bar-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-bar-fill", style: { width: `${v / maxMonth * 100}%` } })), /* @__PURE__ */ React.createElement("span", { className: "sc-bar-value" }, v)))))), toast && /* @__PURE__ */ React.createElement("div", { className: "sc-toast" }, toast));
 }
-
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap');
 
@@ -1241,9 +998,8 @@ const CSS = `
   text-align: center;
 }
 `;
-
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<SushiCounter />);
+root.render(/* @__PURE__ */ React.createElement(SushiCounter, null));
 </script>
 </body>
 </html>
