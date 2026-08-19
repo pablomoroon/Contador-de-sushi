@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <title>Sushi Counter</title>
+<!-- Versión: ajustes + instalación PWA + estadísticas históricas por año -->
 <meta name="theme-color" content="#C1402A" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -209,6 +210,17 @@ function SushiPiece({ type, size = 90 }) {
       return null;
   }
 }
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  window.dispatchEvent(new Event("sushi-pwa-install-ready"));
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  window.dispatchEvent(new Event("sushi-pwa-installed"));
+});
+
 function SushiCounter() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("hoy");
@@ -224,6 +236,12 @@ function SushiCounter() {
   const [newNote, setNewNote] = useState("");
   const [showEndForm, setShowEndForm] = useState(false);
   const [endNote, setEndNote] = useState("");
+  const [selectedYear, setSelectedYear] = useState(YEAR_NOW);
+  const nativeApp = !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === "function" && window.Capacitor.isNativePlatform());
+  const detectStandalone = () => nativeApp || window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const [isStandalone, setIsStandalone] = useState(detectStandalone());
+  const [canInstall, setCanInstall] = useState(!!deferredInstallPrompt);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   const toastTimer = useRef(null);
   const saveTimer = useRef(null);
   const pendingSessionRef = useRef(null);
@@ -278,6 +296,29 @@ function SushiCounter() {
     })();
   }, []);
   useEffect(() => {
+    const onReady = () => setCanInstall(true);
+    const onInstalled = () => {
+      setCanInstall(false);
+      setIsStandalone(true);
+      setShowInstallHelp(false);
+      showToast("Sushi Counter se ha instalado como app");
+    };
+    const media = window.matchMedia("(display-mode: standalone)");
+    const onDisplayMode = () => setIsStandalone(detectStandalone());
+    window.addEventListener("sushi-pwa-install-ready", onReady);
+    window.addEventListener("sushi-pwa-installed", onInstalled);
+    if (media.addEventListener) media.addEventListener("change", onDisplayMode);
+    else if (media.addListener) media.addListener(onDisplayMode);
+    setCanInstall(!!deferredInstallPrompt);
+    setIsStandalone(detectStandalone());
+    return () => {
+      window.removeEventListener("sushi-pwa-install-ready", onReady);
+      window.removeEventListener("sushi-pwa-installed", onInstalled);
+      if (media.removeEventListener) media.removeEventListener("change", onDisplayMode);
+      else if (media.removeListener) media.removeListener(onDisplayMode);
+    };
+  }, []);
+  useEffect(() => {
     const flushNow = () => {
       if (!pendingSessionRef.current) return;
       try {
@@ -327,6 +368,31 @@ function SushiCounter() {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2400);
+  };
+  const installPWA = async () => {
+    if (detectStandalone()) {
+      setIsStandalone(true);
+      showToast("Sushi Counter ya está instalada en este dispositivo");
+      return;
+    }
+    if (deferredInstallPrompt) {
+      const promptEvent = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      setCanInstall(false);
+      try {
+        await promptEvent.prompt();
+        const choice = await promptEvent.userChoice;
+        if (choice && choice.outcome === "accepted") {
+          showToast("Instalando Sushi Counter…");
+        } else {
+          showToast("Instalación cancelada");
+        }
+      } catch (e) {
+        setShowInstallHelp(true);
+      }
+      return;
+    }
+    setShowInstallHelp(true);
   };
   const stamp = () => {
     setSession((prev) => {
@@ -449,19 +515,39 @@ function SushiCounter() {
     setShowAddForm(false);
     showToast("Comida pasada a\xF1adida");
   };
-  const yearMeals = meals.filter((m) => m.date.slice(0, 4) === String(YEAR_NOW));
-  const totalYear = yearMeals.reduce((s, m) => s + m.pieces, 0);
+  // Estadísticas históricas: los años se generan automáticamente a partir del historial.
+  // selectedYear permite consultar cualquier año, incluso dentro de décadas.
+  const currentYearMeals = meals.filter((m) => m.date.slice(0, 4) === String(YEAR_NOW));
+  const totalYear = currentYearMeals.reduce((s, m) => s + m.pieces, 0);
   const totalAll = meals.reduce((s, m) => s + m.pieces, 0);
-  const mealsCountYear = yearMeals.length;
-  const avgPerMeal = mealsCountYear ? (totalYear / mealsCountYear).toFixed(1) : "0.0";
+  const availableYears = Array.from(new Set([
+    YEAR_NOW,
+    selectedYear,
+    ...meals.map((m) => parseInt((m.date || "").slice(0, 4), 10)).filter(Number.isFinite)
+  ])).sort((a, b) => b - a);
+  const statsYearMeals = meals.filter((m) => m.date.slice(0, 4) === String(selectedYear));
+  const statsYearPieces = statsYearMeals.reduce((s, m) => s + m.pieces, 0);
+  const statsYearMealCount = statsYearMeals.length;
+  const statsYearAvg = statsYearMealCount ? (statsYearPieces / statsYearMealCount).toFixed(1) : "0.0";
   const levelTotal = totalAll + session.pieces;
   const { current: levelNow, next: levelNext, progressed } = getLevelInfo(levelTotal);
   const monthTotals = Array(12).fill(0);
-  yearMeals.forEach((m) => {
+  statsYearMeals.forEach((m) => {
     const mo = parseInt(m.date.slice(5, 7), 10) - 1;
     if (mo >= 0 && mo < 12) monthTotals[mo] += m.pieces;
   });
   const maxMonth = Math.max(1, ...monthTotals);
+  const annualStats = availableYears.map((year) => {
+    const list = meals.filter((m) => m.date.slice(0, 4) === String(year));
+    const pieces = list.reduce((s, m) => s + m.pieces, 0);
+    return {
+      year,
+      pieces,
+      meals: list.length,
+      average: list.length ? (pieces / list.length).toFixed(1) : "0.0"
+    };
+  });
+  const maxAnnualPieces = Math.max(1, ...annualStats.map((row) => row.pieces));
   const sortedMeals = [...meals].sort((a, b) => a.date < b.date ? 1 : -1);
   const growScale = Math.min(1 + session.pieces * 0.028, 1.9).toFixed(3);
   if (loading) {
@@ -469,7 +555,7 @@ function SushiCounter() {
   }
   return /* @__PURE__ */ React.createElement("div", { className: "sc-root" }, /* @__PURE__ */ React.createElement("style", null, CSS), /* @__PURE__ */ React.createElement("div", { className: "sc-waves", "aria-hidden": "true" }), /* @__PURE__ */ React.createElement("header", { className: "sc-header" }, /* @__PURE__ */ React.createElement("div", { className: "sc-header-mark" }, /* @__PURE__ */ React.createElement(SushiPiece, { type: pieceType, size: 26 })), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("h1", null, "Sushi Counter"), /* @__PURE__ */ React.createElement("p", { className: "sc-sub" }, "\u5BFF\u53F8\u30AB\u30A6\u30F3\u30BF\u30FC \u30FB registra cada pieza"))), /* @__PURE__ */ React.createElement("nav", { className: "sc-tabs", role: "tablist" }, [
     { id: "hoy", label: "Hoy" },
-    { id: "piezas", label: "Piezas" },
+    { id: "ajustes", label: "Ajustes" },
     { id: "historial", label: "Historial" },
     { id: "stats", label: "Estad\xEDsticas" }
   ].map((t) => /* @__PURE__ */ React.createElement(
@@ -502,17 +588,53 @@ function SushiCounter() {
       onKeyDown: (e) => e.key === "Enter" && confirmEndMeal(),
       maxLength: 60
     }
-  )), /* @__PURE__ */ React.createElement("div", { className: "sc-end-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: cancelEndForm }, /* @__PURE__ */ React.createElement(X, { size: 16 }), " Cancelar"), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: confirmEndMeal }, /* @__PURE__ */ React.createElement(Check, { size: 16 }), " Guardar comida"))), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("div", { className: "sc-yearline" }, /* @__PURE__ */ React.createElement("span", null, "Total ", YEAR_NOW), /* @__PURE__ */ React.createElement("strong", null, totalYear, " piezas"))), tab === "piezas" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Elige tu pieza favorita"), /* @__PURE__ */ React.createElement("p", { className: "sc-hint", style: { marginBottom: 16 } }, "Se usar\xE1 como sello y como icono de la app"), /* @__PURE__ */ React.createElement("div", { className: "sc-piece-grid" }, PIECE_TYPES.map((pt) => /* @__PURE__ */ React.createElement(
-    "button",
-    {
-      key: pt.id,
-      className: `sc-piece-card ${pieceType === pt.id ? "sc-piece-card-active" : ""}`,
-      onClick: () => changePieceType(pt.id)
-    },
-    /* @__PURE__ */ React.createElement(SushiPiece, { type: pt.id, size: 54 }),
-    /* @__PURE__ */ React.createElement("span", null, pt.label),
-    pieceType === pt.id && /* @__PURE__ */ React.createElement("em", { className: "sc-piece-check" }, /* @__PURE__ */ React.createElement(Check, { size: 12 }))
-  )))), tab === "historial" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-hist-header" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comidas registradas"), /* @__PURE__ */ React.createElement("button", { className: "sc-addbtn", onClick: () => setShowAddForm((s) => !s) }, showAddForm ? /* @__PURE__ */ React.createElement(X, { size: 16 }) : /* @__PURE__ */ React.createElement(CalendarPlus, { size: 16 }), showAddForm ? "Cancelar" : "Comida pasada")), /* @__PURE__ */ React.createElement("div", { className: "sc-backup-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: exportHistory }, "Guardar copia"), /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: importHistory }, "Restaurar copia")), showAddForm && /* @__PURE__ */ React.createElement("div", { className: "sc-form" }, /* @__PURE__ */ React.createElement("label", null, "Fecha", /* @__PURE__ */ React.createElement("input", { type: "date", value: newDate, max: todayISO(), onChange: (e) => setNewDate(e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Piezas", /* @__PURE__ */ React.createElement(
+  )), /* @__PURE__ */ React.createElement("div", { className: "sc-end-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: cancelEndForm }, /* @__PURE__ */ React.createElement(X, { size: 16 }), " Cancelar"), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: confirmEndMeal }, /* @__PURE__ */ React.createElement(Check, { size: 16 }), " Guardar comida"))), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("div", { className: "sc-yearline" }, /* @__PURE__ */ React.createElement("span", null, "Total ", YEAR_NOW), /* @__PURE__ */ React.createElement("strong", null, totalYear, " piezas"))), tab === "ajustes" && /* @__PURE__ */ React.createElement(
+    "section",
+    { className: "sc-card" },
+    /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Elige tu pieza favorita"),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-hint", style: { marginBottom: 16 } }, "Se usará como sello y como icono de la app"),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-piece-grid" }, PIECE_TYPES.map((pt) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: pt.id,
+        className: `sc-piece-card ${pieceType === pt.id ? "sc-piece-card-active" : ""}`,
+        onClick: () => changePieceType(pt.id)
+      },
+      /* @__PURE__ */ React.createElement(SushiPiece, { type: pt.id, size: 54 }),
+      /* @__PURE__ */ React.createElement("span", null, pt.label),
+      pieceType === pt.id && /* @__PURE__ */ React.createElement("em", { className: "sc-piece-check" }, /* @__PURE__ */ React.createElement(Check, { size: 12 }))
+    ))),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Aplicación"),
+    /* @__PURE__ */ React.createElement(
+      "div",
+      { className: "sc-install-card" },
+      /* @__PURE__ */ React.createElement(
+        "div",
+        { className: "sc-install-copy" },
+        /* @__PURE__ */ React.createElement("strong", null, isStandalone ? "Sushi Counter ya está instalada" : "Instala Sushi Counter en tu móvil"),
+        /* @__PURE__ */ React.createElement("p", null, isStandalone ? "La estás usando como una aplicación independiente." : "Se añadirá a tu pantalla de inicio y podrás abrirla como cualquier otra app.")
+      ),
+      /* @__PURE__ */ React.createElement(
+        "button",
+        { className: "sc-primary sc-install-btn", onClick: installPWA, disabled: isStandalone },
+        isStandalone ? "✓ App instalada" : canInstall ? "Instalar como app" : "Cómo instalar la app"
+      ),
+      showInstallHelp && !isStandalone && /* @__PURE__ */ React.createElement(
+        "div",
+        { className: "sc-install-help" },
+        /iPad|iPhone|iPod/.test(navigator.userAgent)
+          ? /* @__PURE__ */ React.createElement(React.Fragment, null,
+              /* @__PURE__ */ React.createElement("strong", null, "En iPhone / iPad"),
+              /* @__PURE__ */ React.createElement("p", null, "Pulsa Compartir en Safari y elige “Añadir a pantalla de inicio”.")
+            )
+          : /* @__PURE__ */ React.createElement(React.Fragment, null,
+              /* @__PURE__ */ React.createElement("strong", null, "Si no aparece la instalación automática"),
+              /* @__PURE__ */ React.createElement("p", null, "Abre el menú del navegador (⋮) y pulsa “Instalar aplicación” o “Añadir a pantalla de inicio”.")
+            )
+      )
+    )
+  ), tab === "historial" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-hist-header" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comidas registradas"), /* @__PURE__ */ React.createElement("button", { className: "sc-addbtn", onClick: () => setShowAddForm((s) => !s) }, showAddForm ? /* @__PURE__ */ React.createElement(X, { size: 16 }) : /* @__PURE__ */ React.createElement(CalendarPlus, { size: 16 }), showAddForm ? "Cancelar" : "Comida pasada")), /* @__PURE__ */ React.createElement("div", { className: "sc-backup-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: exportHistory }, "Guardar copia"), /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: importHistory }, "Restaurar copia")), showAddForm && /* @__PURE__ */ React.createElement("div", { className: "sc-form" }, /* @__PURE__ */ React.createElement("label", null, "Fecha", /* @__PURE__ */ React.createElement("input", { type: "date", value: newDate, max: todayISO(), onChange: (e) => setNewDate(e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Piezas", /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "number",
@@ -530,7 +652,62 @@ function SushiCounter() {
       onChange: (e) => setNewNote(e.target.value),
       maxLength: 60
     }
-  )), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: addPastMeal }, "Guardar comida")), sortedMeals.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "sc-empty" }, "A\xFAn no hay comidas guardadas. Termina una comida o a\xF1ade una pasada.") : /* @__PURE__ */ React.createElement("ul", { className: "sc-list" }, sortedMeals.map((m) => /* @__PURE__ */ React.createElement("li", { key: m.id, className: "sc-item" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "sc-item-date" }, formatDate(m.date)), m.note && /* @__PURE__ */ React.createElement("p", { className: "sc-item-note" }, m.note), /* @__PURE__ */ React.createElement("p", { className: "sc-item-pieces" }, m.pieces, " piezas")), /* @__PURE__ */ React.createElement("button", { className: "sc-trash", onClick: () => deleteMeal(m.id), "aria-label": "Eliminar" }, /* @__PURE__ */ React.createElement(Trash2, { size: 16 })))))), tab === "stats" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Resumen de ", YEAR_NOW), /* @__PURE__ */ React.createElement("div", { className: "sc-stat-grid" }, /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, totalYear), /* @__PURE__ */ React.createElement("span", null, "piezas este a\xF1o")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, mealsCountYear), /* @__PURE__ */ React.createElement("span", null, "comidas este a\xF1o")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, avgPerMeal), /* @__PURE__ */ React.createElement("span", null, "piezas / comida")), /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, totalAll), /* @__PURE__ */ React.createElement("span", null, "piezas en total"))), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Tu nivel"), /* @__PURE__ */ React.createElement("div", { className: "sc-level-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-level-top" }, /* @__PURE__ */ React.createElement("span", { className: "sc-level-emoji" }, levelNow.emoji), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, levelNow.label), /* @__PURE__ */ React.createElement("p", null, levelTotal, " piezas acumuladas"))), levelNext && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-fill", style: { width: `${progressed * 100}%` } })), /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, levelNext.min - levelTotal, ' piezas para "', levelNext.label, '" ', levelNext.emoji)), !levelNext && /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, "\xA1Nivel m\xE1ximo alcanzado!")), /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }), /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Piezas por mes"), /* @__PURE__ */ React.createElement("div", { className: "sc-bars" }, monthTotals.map((v, i) => /* @__PURE__ */ React.createElement("div", { className: "sc-bar-row", key: i }, /* @__PURE__ */ React.createElement("span", { className: "sc-bar-label" }, MONTHS_ES[i]), /* @__PURE__ */ React.createElement("div", { className: "sc-bar-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-bar-fill", style: { width: `${v / maxMonth * 100}%` } })), /* @__PURE__ */ React.createElement("span", { className: "sc-bar-value" }, v)))))), toast && /* @__PURE__ */ React.createElement("div", { className: "sc-toast" }, toast));
+  )), /* @__PURE__ */ React.createElement("button", { className: "sc-primary sc-primary-sm", onClick: addPastMeal }, "Guardar comida")), sortedMeals.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "sc-empty" }, "A\xFAn no hay comidas guardadas. Termina una comida o a\xF1ade una pasada.") : /* @__PURE__ */ React.createElement("ul", { className: "sc-list" }, sortedMeals.map((m) => /* @__PURE__ */ React.createElement("li", { key: m.id, className: "sc-item" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "sc-item-date" }, formatDate(m.date)), m.note && /* @__PURE__ */ React.createElement("p", { className: "sc-item-note" }, m.note), /* @__PURE__ */ React.createElement("p", { className: "sc-item-pieces" }, m.pieces, " piezas")), /* @__PURE__ */ React.createElement("button", { className: "sc-trash", onClick: () => deleteMeal(m.id), "aria-label": "Eliminar" }, /* @__PURE__ */ React.createElement(Trash2, { size: 16 })))))), tab === "stats" && /* @__PURE__ */ React.createElement(
+    "section",
+    { className: "sc-card" },
+    /* @__PURE__ */ React.createElement(
+      "div",
+      { className: "sc-stats-head" },
+      /* @__PURE__ */ React.createElement("div", null,
+        /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Estadísticas por año"),
+        /* @__PURE__ */ React.createElement("p", { className: "sc-stats-sub" }, "Consulta y compara todo tu historial")
+      ),
+      /* @__PURE__ */ React.createElement(
+        "select",
+        {
+          className: "sc-year-select",
+          value: selectedYear,
+          onChange: (e) => setSelectedYear(parseInt(e.target.value, 10)),
+          "aria-label": "Seleccionar año"
+        },
+        availableYears.map((year) => /* @__PURE__ */ React.createElement("option", { key: year, value: year }, year))
+      )
+    ),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-stat-grid" },
+      /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, statsYearPieces), /* @__PURE__ */ React.createElement("span", null, "piezas en ", selectedYear)),
+      /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, statsYearMealCount), /* @__PURE__ */ React.createElement("span", null, "comidas en ", selectedYear)),
+      /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, statsYearAvg), /* @__PURE__ */ React.createElement("span", null, "piezas / comida")),
+      /* @__PURE__ */ React.createElement("div", { className: "sc-stat" }, /* @__PURE__ */ React.createElement("strong", null, totalAll), /* @__PURE__ */ React.createElement("span", null, "piezas desde el inicio"))
+    ),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Piezas por mes · ", selectedYear),
+    statsYearMealCount === 0 && /* @__PURE__ */ React.createElement("p", { className: "sc-empty sc-empty-year" }, "No hay comidas guardadas en este año."),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-bars" }, monthTotals.map((v, i) => /* @__PURE__ */ React.createElement("div", { className: "sc-bar-row", key: i }, /* @__PURE__ */ React.createElement("span", { className: "sc-bar-label" }, MONTHS_ES[i]), /* @__PURE__ */ React.createElement("div", { className: "sc-bar-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-bar-fill", style: { width: `${v / maxMonth * 100}%` } })), /* @__PURE__ */ React.createElement("span", { className: "sc-bar-value" }, v)))),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comparar años"),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-stats-sub sc-compare-help" }, "Cada año aparecerá aquí automáticamente. Toca uno para abrir sus estadísticas."),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-year-compare" }, annualStats.map((row) => /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        key: row.year,
+        className: `sc-year-row ${selectedYear === row.year ? "sc-year-row-active" : ""}`,
+        onClick: () => setSelectedYear(row.year)
+      },
+      /* @__PURE__ */ React.createElement("div", { className: "sc-year-row-top" },
+        /* @__PURE__ */ React.createElement("strong", null, row.year),
+        /* @__PURE__ */ React.createElement("span", null, row.pieces, " piezas · ", row.meals, " comidas")
+      ),
+      /* @__PURE__ */ React.createElement("div", { className: "sc-year-bar-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-year-bar-fill", style: { width: `${row.pieces / maxAnnualPieces * 100}%` } })),
+      /* @__PURE__ */ React.createElement("span", { className: "sc-year-average" }, "Media: ", row.average, " piezas/comida")
+    ))),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-divider" }),
+    /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Tu nivel global"),
+    /* @__PURE__ */ React.createElement("div", { className: "sc-level-card" },
+      /* @__PURE__ */ React.createElement("div", { className: "sc-level-top" }, /* @__PURE__ */ React.createElement("span", { className: "sc-level-emoji" }, levelNow.emoji), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("strong", null, levelNow.label), /* @__PURE__ */ React.createElement("p", null, levelTotal, " piezas acumuladas"))),
+      levelNext && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-track" }, /* @__PURE__ */ React.createElement("div", { className: "sc-progress-fill", style: { width: `${progressed * 100}%` } })), /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, levelNext.min - levelTotal, ' piezas para "', levelNext.label, '" ', levelNext.emoji)),
+      !levelNext && /* @__PURE__ */ React.createElement("p", { className: "sc-level-next" }, "¡Nivel máximo alcanzado!")
+    )
+  )), toast && /* @__PURE__ */ React.createElement("div", { className: "sc-toast" }, toast));
 }
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap');
@@ -810,6 +987,53 @@ const CSS = `
   justify-content: center;
 }
 
+.sc-install-card {
+  margin-top: 10px;
+  background: var(--washi-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+}
+.sc-install-copy strong {
+  display: block;
+  font-size: 14px;
+  color: var(--sumi);
+  margin-bottom: 4px;
+}
+.sc-install-copy p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--sumi);
+  opacity: 0.66;
+}
+.sc-install-btn {
+  box-shadow: none;
+}
+.sc-install-btn:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+.sc-install-help {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  background: #FBF7EE;
+  border: 1px solid var(--line);
+}
+.sc-install-help strong {
+  display: block;
+  font-size: 12px;
+  color: var(--ai);
+  margin-bottom: 3px;
+}
+.sc-install-help p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--sumi);
+}
+
 .sc-level-chip {
   display: inline-flex;
   align-items: center;
@@ -992,6 +1216,97 @@ const CSS = `
   padding: 6px;
 }
 .sc-trash:hover { opacity: 1; color: var(--shu); }
+
+.sc-stats-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.sc-stats-sub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--sumi);
+  opacity: 0.58;
+}
+.sc-year-select {
+  min-width: 96px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 28px 9px 11px;
+  background: var(--washi-2);
+  color: var(--sumi);
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.sc-year-select:focus { outline: 2px solid rgba(193,64,42,0.22); border-color: var(--shu); }
+.sc-empty-year { padding: 8px 0 12px; }
+.sc-compare-help { margin-bottom: 12px; }
+.sc-year-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 330px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sc-year-row {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--washi-2);
+  color: var(--sumi);
+  padding: 11px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Zen Kaku Gothic New', sans-serif;
+}
+.sc-year-row-active {
+  background: #fff;
+  border-color: var(--shu);
+  box-shadow: 0 2px 8px rgba(193,64,42,0.12);
+}
+.sc-year-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.sc-year-row-top strong {
+  font-family: 'Shippori Mincho', serif;
+  font-size: 17px;
+  color: var(--shu-dark);
+}
+.sc-year-row-top span { font-size: 11.5px; color: var(--ai); }
+.sc-year-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+.sc-year-bar-fill {
+  height: 100%;
+  min-width: 0;
+  background: linear-gradient(90deg, var(--gold), var(--shu));
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+.sc-year-average {
+  display: block;
+  margin-top: 6px;
+  font-size: 10.5px;
+  opacity: 0.58;
+}
+@media (max-width: 380px) {
+  .sc-stats-head { align-items: stretch; flex-direction: column; }
+  .sc-year-select { width: 100%; }
+  .sc-year-row-top { align-items: flex-start; flex-direction: column; gap: 1px; }
+}
 
 .sc-stat-grid {
   display: grid;
