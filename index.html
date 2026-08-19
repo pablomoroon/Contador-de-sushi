@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <title>Sushi Counter</title>
 <meta name="theme-color" content="#C1402A" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Sushi Counter" />
 <meta name="description" content="Cuenta cada pieza de sushi que comes y lleva tu historial anual." />
 <link rel="manifest" href="./manifest.json" />
 <link rel="icon" href="./icon-192.png" />
@@ -83,6 +87,12 @@
       return { keys: keys, prefix: prefix, shared: !!shared };
     }
   };
+
+  // Solicita almacenamiento persistente cuando el navegador lo permite.
+  // En la APK, localStorage vive dentro de los datos privados de la aplicación.
+  if (navigator.storage && navigator.storage.persist) {
+    navigator.storage.persist().catch(function () {});
+  }
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", function () {
@@ -268,12 +278,25 @@ function SushiCounter() {
     })();
   }, []);
   useEffect(() => {
-    return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      if (pendingSessionRef.current) {
-        window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false).catch(() => {
-        });
+    const flushNow = () => {
+      if (!pendingSessionRef.current) return;
+      try {
+        localStorage.setItem(storageKey("current-session", false), JSON.stringify(pendingSessionRef.current));
+        pendingSessionRef.current = null;
+      } catch (e) {
+        window.storage.set("current-session", JSON.stringify(pendingSessionRef.current), false).catch(() => {});
       }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushNow();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flushNow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flushNow);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      flushNow();
     };
   }, []);
   const saveMeals = useCallback(async (next) => {
@@ -356,6 +379,62 @@ function SushiCounter() {
   const deleteMeal = (id) => {
     saveMeals(meals.filter((m) => m.id !== id));
   };
+  const exportHistory = () => {
+    const payload = {
+      app: "Sushi Counter",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      meals,
+      session,
+      pieceType
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sushi-counter-copia-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast("Copia del historial creada");
+  };
+  const importHistory = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        if (!data || !Array.isArray(data.meals)) throw new Error("Formato no válido");
+        const restoredMeals = data.meals
+          .filter(m => m && typeof m.date === "string" && Number(m.pieces) > 0)
+          .map(m => ({
+            id: m.id || uid(),
+            date: m.date,
+            pieces: Number(m.pieces),
+            note: typeof m.note === "string" ? m.note : ""
+          }));
+        await saveMeals(restoredMeals);
+        if (data.session && Number(data.session.pieces) >= 0) {
+          await saveSession({
+            pieces: Number(data.session.pieces) || 0,
+            startedAt: data.session.startedAt || todayISO(),
+            note: data.session.note || ""
+          });
+        }
+        if (typeof data.pieceType === "string" && PIECE_TYPES.some(p => p.id === data.pieceType)) {
+          await changePieceType(data.pieceType);
+        }
+        showToast(`Historial restaurado: ${restoredMeals.length} comidas`);
+      } catch (e) {
+        showToast("La copia seleccionada no es válida");
+      }
+    };
+    input.click();
+  };
   const addPastMeal = () => {
     const n = parseInt(newPieces, 10);
     if (!newDate || !n || n <= 0) {
@@ -433,7 +512,7 @@ function SushiCounter() {
     /* @__PURE__ */ React.createElement(SushiPiece, { type: pt.id, size: 54 }),
     /* @__PURE__ */ React.createElement("span", null, pt.label),
     pieceType === pt.id && /* @__PURE__ */ React.createElement("em", { className: "sc-piece-check" }, /* @__PURE__ */ React.createElement(Check, { size: 12 }))
-  )))), tab === "historial" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-hist-header" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comidas registradas"), /* @__PURE__ */ React.createElement("button", { className: "sc-addbtn", onClick: () => setShowAddForm((s) => !s) }, showAddForm ? /* @__PURE__ */ React.createElement(X, { size: 16 }) : /* @__PURE__ */ React.createElement(CalendarPlus, { size: 16 }), showAddForm ? "Cancelar" : "Comida pasada")), showAddForm && /* @__PURE__ */ React.createElement("div", { className: "sc-form" }, /* @__PURE__ */ React.createElement("label", null, "Fecha", /* @__PURE__ */ React.createElement("input", { type: "date", value: newDate, max: todayISO(), onChange: (e) => setNewDate(e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Piezas", /* @__PURE__ */ React.createElement(
+  )))), tab === "historial" && /* @__PURE__ */ React.createElement("section", { className: "sc-card" }, /* @__PURE__ */ React.createElement("div", { className: "sc-hist-header" }, /* @__PURE__ */ React.createElement("p", { className: "sc-label" }, "Comidas registradas"), /* @__PURE__ */ React.createElement("button", { className: "sc-addbtn", onClick: () => setShowAddForm((s) => !s) }, showAddForm ? /* @__PURE__ */ React.createElement(X, { size: 16 }) : /* @__PURE__ */ React.createElement(CalendarPlus, { size: 16 }), showAddForm ? "Cancelar" : "Comida pasada")), /* @__PURE__ */ React.createElement("div", { className: "sc-backup-actions" }, /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: exportHistory }, "Guardar copia"), /* @__PURE__ */ React.createElement("button", { className: "sc-minor", onClick: importHistory }, "Restaurar copia")), showAddForm && /* @__PURE__ */ React.createElement("div", { className: "sc-form" }, /* @__PURE__ */ React.createElement("label", null, "Fecha", /* @__PURE__ */ React.createElement("input", { type: "date", value: newDate, max: todayISO(), onChange: (e) => setNewDate(e.target.value) })), /* @__PURE__ */ React.createElement("label", null, "Piezas", /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "number",
@@ -471,7 +550,7 @@ const CSS = `
   min-height: 100%;
   max-width: 480px;
   margin: 0 auto;
-  padding: 20px 16px 40px;
+  padding: calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   position: relative;
   overflow-x: hidden;
   box-sizing: border-box;
@@ -793,6 +872,18 @@ const CSS = `
   font-size: 14px;
 }
 .sc-yearline strong { font-family: 'Shippori Mincho', serif; font-size: 18px; color: var(--shu-dark); }
+
+.sc-backup-actions {
+  display: flex;
+  gap: 8px;
+  margin: -4px 0 14px;
+  flex-wrap: wrap;
+}
+.sc-backup-actions .sc-minor {
+  flex: 1;
+  justify-content: center;
+  min-width: 130px;
+}
 
 .sc-hist-header {
   display: flex;
